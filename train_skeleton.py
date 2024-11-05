@@ -269,8 +269,8 @@ group.add_argument('--no-aug', action='store_true', default=False,
                    help='Disable all training augmentation, override other train aug args')
 group.add_argument('--train-crop-mode', type=str, default=None,
                    help='Crop-mode in train'),
-# group.add_argument('--scale', type=float, nargs='+', default=[0.08, 1.0], metavar='PCT',
-#                    help='Random resize scale (default: 0.08 1.0)')
+group.add_argument('--scale', type=float, nargs='+', default=[0.08, 1.0], metavar='PCT',
+                   help='Random resize scale (default: 0.08 1.0)')
 # group.add_argument('--ratio', type=float, nargs='+', default=[3. / 4., 4. / 3.], metavar='RATIO',
 #                    help='Random resize aspect ratio (default: 0.75 1.33)')
 group.add_argument('--hflip', type=float, default=0.5,
@@ -469,6 +469,8 @@ def main():
             file=args.pretrained_path,
             num_classes=-1,  # force head adaptation
         )
+
+    args.model_kwargs['channel_size'] = args.input_size[-1]
 
     model = create_model(
         args.model,
@@ -702,6 +704,7 @@ def main():
 
     # create data loaders w/ augmentation pipeline
     train_interpolation = "bilinear" #args.train_interpolation
+    print(args.scale)
     if args.no_aug or not train_interpolation:
         train_interpolation = data_config['interpolation']
     loader_train = create_loader(
@@ -715,7 +718,7 @@ def main():
         re_count=0, #args.recount,
         re_split=False, #args.resplit,
         train_crop_mode=args.train_crop_mode,
-        scale=[1,1], #args.scale,
+        scale=args.scale, # [1,1]
         ratio=[1,1],#args.ratio,
         hflip=args.hflip,
         vflip=0, #args.vflip,
