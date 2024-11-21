@@ -1,28 +1,30 @@
 #!/bin/bash
-#SBATCH --time=99:00:00
+#SBATCH --time=160:00:00
 #SBATCH -p gpu --gres=gpu:2
 #SBATCH -n 4
 #SBATCH -N 1
 #SBATCH --mem=80GB
-#SBATCH -o alex5.out
-#SBATCH -e alex5.err
+#SBATCH -o alexmax_cl_0_ip_5.out
+#SBATCH -e alexmax_cl_0_ip_5.err
 #SBATCH --account=carney-tserre-condo
-#SBATCH -J alex5
+#SBATCH -J alexmax_cl_0_ip_5_2
 
 
 module load anaconda/2023.09-0-7nso27y
 module load python/3.9.16s-x3wdtvt
 module load cuda
 
-source activate /users/npant1/anaconda3/envs/hmax
+source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 sh distributed_train.sh 1 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
-    --model alexnet \
+    --model alexmax \
+    --model-kwargs ip_scale_bands=2 classifier_input_size=16384 \
+    --cl-lambda 0\
     --opt sgd \
     -b 128 \
-    --epochs 90 \
+    --epochs 120 \
     --lr 1e-2 \
     --weight-decay 5e-4 \
     --sched step \
@@ -33,13 +35,5 @@ sh distributed_train.sh 1 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment alexnet_debug \
+    --experiment debug_alexmax_cl_0_ip_2_227_9216 \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
-
-# sh distributed_train.sh 8 validate.py \
-#     --epochs 1 \
-#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-#     --dataset torch/imagenet \
-#     --model alexnet \
-#     --pretrained \
-#     -b 128 \

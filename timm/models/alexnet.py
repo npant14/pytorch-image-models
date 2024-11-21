@@ -48,6 +48,7 @@ class AlexNet(nn.Module):
             nn.Linear(4096, num_classes))
         
     def forward(self, x):
+        
         out = self.layer1(x)
         out = self.layer2(out)
         out = self.layer3(out)

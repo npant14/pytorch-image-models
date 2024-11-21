@@ -1023,6 +1023,11 @@ def train_one_epoch(
                     output = model(input)
                     loss = loss_fn(output, target)
             except:
+                
+                if model.contrastive_loss:
+                    output, scale_loss = model(input)
+                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+                else:
                     output = model(input)
                     loss = loss_fn(output, target)
 
