@@ -16,11 +16,11 @@ module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-sh distributed_train.sh 2 train_skeleton.py \
+sh distributed_train.sh 1 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model chalexmax \
-    --model-kwargs ip_scale_bands=2 classifier_input_size=9216 hmax_type='alexmax' \
+    --model-kwargs ip_scale_bands=1 classifier_input_size=9216 hmax_type='alexmax' \
     --cl-lambda 0\
     --opt sgd \
     -b 128 \
@@ -35,5 +35,5 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment chalexmax_v2.1_cl_0_ip_2_227_9216_debug \
+    --experiment chalexmax_v2.2_cl_0_ip_2_227_9216_debug \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \

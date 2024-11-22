@@ -126,6 +126,9 @@ general get ip scales function (cleaner code)
 scale: the denominator of the exponent. ie. if you want to scale by 2^(1/4), this should be 4
 """
 def get_ip_scales(num_scale_bands, base_image_size, scale=4):
+    
+    if num_scale_bands == 1:
+        return [base_image_size]
     if num_scale_bands % 2 == 1:
         # If x is odd, create an array centered at 0
         image_scales = np.arange(-num_scale_bands//2 + 1, num_scale_bands//2 + 2)
@@ -134,6 +137,7 @@ def get_ip_scales(num_scale_bands, base_image_size, scale=4):
         image_scales = np.arange(-num_scale_bands//2, num_scale_bands//2 + 1)
 
     image_scales = [np.ceil(base_image_size/(2**(i/scale))) for i in image_scales]
+    
     image_scales.sort()
     if num_scale_bands > 2:
         assert(len(image_scales) == num_scale_bands + 1)
