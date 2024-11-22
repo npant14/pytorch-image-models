@@ -1016,13 +1016,14 @@ def train_one_epoch(
             # with amp_autocast():
             try:
                 if model.module.contrastive_loss:
+                    
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
             # default normal model behavior
                 else: 
                     output = model(input)
                     loss = loss_fn(output, target)
-            except:
+            except Exception as e:
                 
                 if model.contrastive_loss:
                     output, scale_loss = model(input)

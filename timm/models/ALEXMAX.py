@@ -223,112 +223,8 @@ class C(nn.Module):
 import torch
 import torch.nn as nn
 
-class ConvScoring(nn.Module):
-    def __init__(self, num_channels):
-        super(ConvScoring, self).__init__()
-        # Use adaptive average pooling to reduce H and W to 1x1
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        # Linear layer to map from num_channels to 1
-        self.fc = nn.Linear(num_channels, 1)
 
-    def forward(self, x):
-        # x: [B, K, H, W]
-        B, K, H, W = x.shape
-        # Apply adaptive pooling
-        x_pooled = self.pool(x)  # Shape: [B, K, 1, 1]
-        x_pooled = x_pooled.view(B, K)  # Shape: [B, K]
-        # Apply linear layer
-        scores = self.fc(x_pooled)  # Shape: [B, 1]
-        scores = scores.squeeze(1)  # Shape: [B]
-        return scores
 
-class C_scoring(nn.Module):
-    # Spatial then Scale
-    def __init__(self,
-                 num_channels,
-                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
-                 pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
-                 global_scale_pool=False):
-        super(C_scoring, self).__init__()
-        # Pooling functions
-        self.pool1 = pool_func1
-        self.pool2 = pool_func2
-        self.global_scale_pool = global_scale_pool
-        self.num_channels = num_channels
-        # Learnable scoring function
-        # A 1x1 convolution that maps from num_channels to 1 (score)
-        self.scoring_conv = ConvScoring(num_channels)
-
-    def forward(self, x_pyramid):
-        out = []
-        if self.global_scale_pool:
-            if len(x_pyramid) == 1:
-                return self.pool1(x_pyramid[0])
-
-            out = [self.pool1(x) for x in x_pyramid]
-            # resize everything to be the same size
-            final_size = out[len(out) // 2].shape[-2:]
-            out_1 = F.interpolate(out[0], final_size, mode='bilinear')
-            for x in x_pyramid[1:]:
-                temp = F.interpolate(x, final_size, mode='bilinear')
-                score_out = self.scoring_conv(out_1)  # Shape: [N, H, W]
-                score_temp = self.scoring_conv(temp)  # Shape: [N, H, W]
-                idx = torch.argmax(torch.stack([score_out, score_temp], dim=1), dim=1)  # Shape: [N, H, W]
-                out = torch.zeros_like(out_1)
-                out[idx == 1] = temp[idx == 1]
-                out[idx == 0] = out_1[idx == 0]
-                del temp  # Free memory immediately
-            
-
-        else:  # Not global pool
-            if len(x_pyramid) == 1:
-                return [self.pool1(x_pyramid[0])]
-            
-            out_middle = self.pool1(x_pyramid[len(x_pyramid)//2])
-            final_size = out_middle.shape[-2:]
-
-            for i in range(len(x_pyramid) - 1):
-                x_1 = x_pyramid[i]
-                x_2 = x_pyramid[i + 1]
-
-                # Spatial pooling
-                x_1 = self.pool1(x_1)
-                x_2 = self.pool2(x_2)
-
-                # Resize to match spatial dimensions
-                #if x_1.shape[-1] > x_2.shape[-1]:
-                #    x_2 = F.interpolate(x_2, size=x_1.shape[-2:], mode='bilinear', align_corners=False)
-                #else:
-                #    x_1 = F.interpolate(x_1, size=x_2.shape[-2:], mode='bilinear', align_corners=False)
-                ## Lets resize to middle size of the pyramid all the time. 
-                x_2 = F.interpolate(x_2, size =final_size, mode = 'bilinear')
-                x_1 = F.interpolate(x_1, size = final_size, mode = 'bilinear')
-
-               
-                # Compute scores using the learnable scoring function
-                s_1 = self.scoring_conv(x_1)  # Shape: [N, 1, H, W]
-                s_2 = self.scoring_conv(x_2)  # Shape: [N, 1, H, W]
-
-                # Stack scores along a new dimension (scale dimension)
-                scores = torch.stack([s_1, s_2], dim=1)  # Shape: [N, 2, 1, H, W]
-                
-                # Find the scale index with the maximum score at each spatial location
-                # Shape of idx: [N, H, W]
-                
-                idx = torch.argmax(scores, dim=1)
-                
-                to_append = torch.zeros_like(x_1)   
-                
-                to_append[idx == 1] = x_2[idx == 1]
-                to_append[idx == 0] = x_1[idx == 0]
-                
-               
-
-                out.append(to_append)
-
-                
-
-        return out
     
 class ALEXMAX(nn.Module):
     def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False):
@@ -406,6 +302,109 @@ class ALEXMAX(nn.Module):
         if self.contrastive_loss:
             return out, out_c1[0],out_c2[0]
         
+        return out
+
+
+class ConvScoring(nn.Module):
+    def __init__(self, num_channels):
+        super(ConvScoring, self).__init__()
+        # Use adaptive average pooling to reduce H and W to 1x1
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        # Linear layer to map from num_channels to 1
+        self.fc = nn.Linear(num_channels, 1)
+
+    def forward(self, x):
+        # x: [B, K, H, W]
+        B, K, H, W = x.shape
+        # Apply adaptive pooling
+        x_pooled = self.pool(x)  # Shape: [B, K, 1, 1]
+        x_pooled = x_pooled.view(B, K)  # Shape: [B, K]
+        # Apply linear layer
+        scores = self.fc(x_pooled)  # Shape: [B, 1]
+        scores = scores.squeeze(1)  # Shape: [B]
+        return scores
+    
+class C_scoring(nn.Module):
+    # Spatial then Scale
+    def __init__(self,
+                 num_channels,
+                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+                 pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+                 global_scale_pool=False):
+        super(C_scoring, self).__init__()
+        # Pooling functions
+        self.pool1 = pool_func1
+        self.pool2 = pool_func2
+        self.global_scale_pool = global_scale_pool
+        self.num_channels = num_channels
+        # Learnable scoring function
+        # A 1x1 convolution that maps from num_channels to 1 (score)
+        self.scoring_conv = ConvScoring(num_channels)
+
+    def forward(self, x_pyramid):
+        out = []
+        if self.global_scale_pool:
+            if len(x_pyramid) == 1:
+                pooled = self.pool1(x_pyramid[0])
+                _ = self.scoring_conv(pooled)  # Shape: [N]
+                return pooled
+
+            out = [self.pool1(x) for x in x_pyramid]
+            # resize everything to be the same size
+            final_size = out[len(out) // 2].shape[-2:]
+            out_1 = F.interpolate(out[0], final_size, mode='bilinear')
+            for x in x_pyramid[1:]:
+                temp = F.interpolate(x, final_size, mode='bilinear')
+                score_out = self.scoring_conv(out_1)  # Shape: [N, H, W]
+                score_temp = self.scoring_conv(temp)  # Shape: [N, H, W]
+                idx = torch.argmax(torch.stack([score_out, score_temp], dim=1), dim=1)  # Shape: [N, H, W]
+                x = torch.stack([out_1, temp], dim=4)  # Shape: [N, H, W, 2]
+                out = x[:, :, :, :, idx]
+                del temp  # Free memory immediately
+            
+
+        else:  # Not global pool
+            if len(x_pyramid) == 1:
+                pooled = self.pool1(x_pyramid[0])
+                _ = self.scoring_conv(pooled)
+                return [pooled]
+            
+            out_middle = self.pool1(x_pyramid[len(x_pyramid)//2])
+            final_size = out_middle.shape[-2:]
+
+            for i in range(len(x_pyramid) - 1):
+                x_1 = x_pyramid[i]
+                x_2 = x_pyramid[i + 1]
+                # Spatial pooling
+                x_1 = self.pool1(x_1)
+                x_2 = self.pool2(x_2)
+                x_2 = F.interpolate(x_2, size =final_size, mode = 'bilinear')
+                x_1 = F.interpolate(x_1, size = final_size, mode = 'bilinear')
+                
+                # Compute scores using the learnable scoring function
+                s_1 = self.scoring_conv(x_1)  # Shape: [N, 1, H, W]
+                s_2 = self.scoring_conv(x_2)  # Shape: [N, 1, H, W]
+                # Stack scores along a new dimension (scale dimension)
+                scores = torch.stack([s_1, s_2], dim=1)  # Shape: [N, 2, 1, H, W]
+                # Find the scale index with the maximum score at each spatial location
+                # Shape of idx: [N, H, W]
+                
+                idx = torch.argmax(scores, dim=1)
+               
+                
+                # Expand idx to match the shape of x
+               
+                
+                x = torch.stack([x_1, x_2], dim=1)  # Shape: [N, 2, C, H, W]
+
+                # Use advanced indexing to select the correct elements
+                batch_size = x.size(0)
+                batch_indices = torch.arange(batch_size).to(x.device)  # Ensure the tensor is on the correct device
+                to_append = x[batch_indices, idx, :, :, :]
+                out.append(to_append)
+
+                
+
         return out
 
 class ALEXMAX_pyramid(nn.Module):

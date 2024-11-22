@@ -26,7 +26,8 @@ sh distributed_train.sh 2 train_skeleton.py \
     -b 128 \
     --epochs 120 \
     --lr 1e-2 \
-    --weight-decay 5e-4 \
+    #--weight-decay 5e-4\
+    --weight-decay 5e-6 
     --sched step \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
@@ -35,5 +36,5 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment chalexmax_v2_cl_0_ip_2_227_9216 \
+    --experiment chalexmax_v2.1_cl_0_ip_2_227_wd5e-6_9216 \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
