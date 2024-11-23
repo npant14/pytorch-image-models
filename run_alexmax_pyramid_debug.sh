@@ -35,5 +35,5 @@ sh distributed_train.sh 1 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment alexmax_pyramid_v2_cl_0_ip_2_227_9216 \
+    --experiment alexmax_pyramid_v2.1_cl_0_ip_2_227_9216 \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \

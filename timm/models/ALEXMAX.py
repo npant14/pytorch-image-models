@@ -25,7 +25,7 @@ def check_for_nans(tensor, name):
 class S1_old(nn.Module):
     def __init__(self,kernel_size=11, stride=4, padding=0):
         super(S1_old, self).__init__()
-        
+
         self.layer1 = nn.Sequential(
             nn.Conv2d(3, 96, kernel_size=kernel_size, stride=stride, padding=padding),
             nn.BatchNorm2d(96),
@@ -34,11 +34,11 @@ class S1_old(nn.Module):
     def forward(self, x_pyramid):
         # get dimensions
         return [self.layer1(x) for x in x_pyramid]
-    
+
 class S1(nn.Module):
     def __init__(self,kernel_size=11, stride=4, padding=0):
         super(S1, self).__init__()
-        
+
         self.layer1 = nn.Sequential(
             nn.Conv2d(3, 96, kernel_size=kernel_size, stride=stride, padding=padding),
             nn.BatchNorm2d(96),
@@ -119,6 +119,7 @@ class C_mid(nn.Module):
     def forward(self,x_pyramid):
         # if only one thing in pyramid, return
 
+        
 
         out = []
         if self.global_scale_pool:
@@ -128,37 +129,36 @@ class C_mid(nn.Module):
             out = [self.pool1(x) for x in x_pyramid]
             # resize everything to be the same size
             final_size = out[len(out) // 2].shape[-2:]
-            out = F.interpolate(out[0], final_size, mode='bicubic')
+            out = F.interpolate(out[0], final_size, mode='biliear')
 
             for x in x_pyramid[1:]:
-                temp = F.interpolate(x, final_size, mode='bicubic')
+                temp = F.interpolate(x, final_size, mode='bilinear')
                 out = torch.max(out, temp)  # Out-of-place operation to avoid in-place modification
                 del temp  # Free memory immediately
 
         else: # not global pool
-
             if len(x_pyramid) == 1:
                 return [self.pool1(x_pyramid[0])]
+
+
             out_middle = self.pool1(x_pyramid[len(x_pyramid)//2])
             final_size = out_middle.shape[-2:]
-            
+
+
             for i in range(0, len(x_pyramid) - 1):
                 x_1 = x_pyramid[i]
                 x_2 = x_pyramid[i+1]
 
-
                 #spatial pooling
                 x_1 = self.pool1(x_1)
                 x_2 = self.pool2(x_2)
-                
-               
-                
-                ## Lets resize to middle size of the pyramid all the time. 
+
+                ## Lets resize to middle size of the pyramid all the time.
                 x_2 = F.interpolate(x_2, size =final_size, mode = 'bicubic')
                 x_1 = F.interpolate(x_1, size = final_size, mode = 'bicubic')
 
                 x = torch.stack([x_1, x_2], dim=4)
-                
+
                 #get index
                 #index = torch.argmax(x, dim=4)
                 #smoothing index selection so patches have the same size selected
@@ -201,10 +201,11 @@ class C(nn.Module):
 
             if len(x_pyramid) == 1:
                 return [self.pool1(x_pyramid[0])]
-            
+
+
             for i in range(0, len(x_pyramid) - 1):
                 x_1 = x_pyramid[i]
-                x_2 = x_pyramid[i+1]  
+                x_2 = x_pyramid[i+1]
                 #spatial pooling
                 x_1 = self.pool1(x_1)
                 x_2 = self.pool2(x_2)
@@ -214,7 +215,7 @@ class C(nn.Module):
                 else:
                     x_1 = F.interpolate(x_1, size = x_2.shape[-2:], mode = 'bilinear')
                 x = torch.stack([x_1, x_2], dim=4)
-               
+
                 to_append, _ = torch.max(x, dim=4)
 
                 out.append(to_append)
@@ -223,20 +224,102 @@ class C(nn.Module):
 import torch
 import torch.nn as nn
 
-
-
-    
-class ALEXMAX(nn.Module):
-    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False):
+class ALEXMAX_v0(nn.Module):
+    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
         #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
         self.ip_scale_bands = ip_scale_bands
-        super(ALEXMAX, self).__init__()
+        self.pyramid = pyramid
+        super(ALEXMAX_v0, self).__init__()
+
 
         self.s1 = S1()
-        self.c1= C_mid(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        self.c1= C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        #self.s2b = S2b()
+        #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s2 = S2()
+        self.c2 = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s3 = S3()
+        self.global_pool =  C(global_scale_pool=True)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU())
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU())
+        self.fc2= nn.Sequential(
+            nn.Linear(4096, num_classes))
+    def make_ip(self, x):
+        ## num_scale_bands = num images in IP - 1
+        num_scale_bands = self.ip_scale_bands
+        base_image_size = int(x.shape[-1])
+        scale = 4   ## factor in exponenet
+
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale)
+
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear').clamp(min=0, max=1)
+
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+        else:
+            return [x]
+
+    def forward(self, x,pyramid=False):
+
+        
+        #resize image 
+        
+        if pyramid or self.pyramid:
+            out = self.make_ip(x)
+        else:
+            out = [x]
+
+        ## should make SxBxCxHxW
+        out = self.s1(out)
+        
+
+        out_c1 = self.c1(out)
+        #bypass layers
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        if pyramid:
+            return out_c1[0],out_c2[0]
+
+        out = self.s3(out_c2)
+        out = self.global_pool(out)
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        if self.contrastive_loss:
+            return out, out_c1[0],out_c2[0]
+
+        return out
+
+
+class ALEXMAX(nn.Module):
+    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        super(ALEXMAX, self).__init__()
+
+
+        self.s1 = S1()
+        self.c1= C_mid(nn.MaxPool2d(kernel_size = 2, stride = 3,padding=1), nn.MaxPool2d(kernel_size = 3, stride = 2))
         #self.s2b = S2b()
         #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
         self.s2 = S2()
@@ -275,33 +358,35 @@ class ALEXMAX(nn.Module):
     def forward(self, x,pyramid=False):
 
         
-        if pyramid:
+        #resize image 
+        
+        if pyramid or self.pyramid:
             out = self.make_ip(x)
-            
         else:
             out = [x]
-        
-       
-        ## should make SxBxCxHxW
 
+        ## should make SxBxCxHxW
         out = self.s1(out)
+        
+
         out_c1 = self.c1(out)
         #bypass layers
         out = self.s2(out_c1)
         out_c2 = self.c2(out)
-        
+
         if pyramid:
             return out_c1[0],out_c2[0]
-        
+
         out = self.s3(out_c2)
         out = self.global_pool(out)
         out = out.reshape(out.size(0), -1)
         out = self.fc(out)
         out = self.fc1(out)
         out = self.fc2(out)
+
         if self.contrastive_loss:
             return out, out_c1[0],out_c2[0]
-        
+
         return out
 
 
@@ -323,7 +408,7 @@ class ConvScoring(nn.Module):
         scores = self.fc(x_pooled)  # Shape: [B, 1]
         scores = scores.squeeze(1)  # Shape: [B]
         return scores
-    
+
 class C_scoring(nn.Module):
     # Spatial then Scale
     def __init__(self,
@@ -361,14 +446,14 @@ class C_scoring(nn.Module):
                 x = torch.stack([out_1, temp], dim=4)  # Shape: [N, H, W, 2]
                 out = x[:, :, :, :, idx]
                 del temp  # Free memory immediately
-            
+
 
         else:  # Not global pool
             if len(x_pyramid) == 1:
                 pooled = self.pool1(x_pyramid[0])
                 _ = self.scoring_conv(pooled)
                 return [pooled]
-            
+
             out_middle = self.pool1(x_pyramid[len(x_pyramid)//2])
             final_size = out_middle.shape[-2:]
 
@@ -380,7 +465,7 @@ class C_scoring(nn.Module):
                 x_2 = self.pool2(x_2)
                 x_2 = F.interpolate(x_2, size =final_size, mode = 'bilinear')
                 x_1 = F.interpolate(x_1, size = final_size, mode = 'bilinear')
-                
+
                 # Compute scores using the learnable scoring function
                 s_1 = self.scoring_conv(x_1)  # Shape: [N, 1, H, W]
                 s_2 = self.scoring_conv(x_2)  # Shape: [N, 1, H, W]
@@ -388,13 +473,13 @@ class C_scoring(nn.Module):
                 scores = torch.stack([s_1, s_2], dim=1)  # Shape: [N, 2, 1, H, W]
                 # Find the scale index with the maximum score at each spatial location
                 # Shape of idx: [N, H, W]
-                
+
                 idx = torch.argmax(scores, dim=1)
-               
-                
+
+
                 # Expand idx to match the shape of x
-               
-                
+
+
                 x = torch.stack([x_1, x_2], dim=1)  # Shape: [N, 2, C, H, W]
 
                 # Use advanced indexing to select the correct elements
@@ -403,7 +488,7 @@ class C_scoring(nn.Module):
                 to_append = x[batch_indices, idx, :, :, :]
                 out.append(to_append)
 
-                
+
 
         return out
 
@@ -450,7 +535,7 @@ class ALEXMAX_pyramid(nn.Module):
                 interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear')
                 #ensure is between 0 and 1 after interpolation
                 interpolated_img = interpolated_img.clamp(min=0, max=1)
-                
+
 
                 image_pyramid.append(interpolated_img)
             return image_pyramid
@@ -501,14 +586,14 @@ class CHALEXMAX(nn.Module):
 
         # the below line is so that the training script calculates the loss correctly
         self.contrastive_loss = True
-    
+
         if hmax_type == "alexmax":
             self.model_backbone = ALEXMAX(num_classes=num_classes,
                                                         in_chans=in_chans,
                                                         ip_scale_bands=ip_scale_bands,
                                                         classifier_input_size=classifier_input_size,
                                                         contrastive_loss=True)
-            
+
         else:
             raise(NotImplementedError)
 
@@ -533,7 +618,8 @@ class CHALEXMAX(nn.Module):
         elif new_hw > img_hw:
             center_crop = torchvision.transforms.CenterCrop(img_hw)
             x_rescaled = center_crop(x_rescaled)
-        stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled,pyramid=True)        
+
+        stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled,pyramid=True)
         correct_scale_loss_c1 = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
         correct_scale_loss_c2 = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
         correct_scale_loss = (correct_scale_loss_c1 + correct_scale_loss_c2) / 2
@@ -547,6 +633,19 @@ def checkpoint_filter_fn(state_dict, model: nn.Module):
     return out_dict
 
 
+@register_model
+def alexmax_v0(pretrained=False, **kwargs):
+    #deleting some kwargs that are messing up training
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    model = ALEXMAX_v0(**kwargs)
+    if pretrained:
+        raise NotImplementedError
+    return model
 
 
 @register_model

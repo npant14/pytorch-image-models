@@ -20,7 +20,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model alexmax \
-    --model-kwargs ip_scale_bands=2 classifier_input_size=9216 \
+    --model-kwargs ip_scale_bands=0 classifier_input_size=9216 \
     --cl-lambda 0\
     --opt sgd \
     -b 128 \
@@ -35,5 +35,5 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment bicubic_middle_resize_nidpool_smooth_alexmax_cl_0_ip_2_227_9216 \
+    --experiment alexmax_cl_0_ip_0_227_9216_control \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
