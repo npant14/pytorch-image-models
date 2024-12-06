@@ -151,6 +151,9 @@ scripting_group.add_argument('--aot-autograd', default=False, action='store_true
 
 parser.add_argument('--results-file', default='', type=str, metavar='FILENAME',
                     help='Output csv file for validation results (summary)')
+
+parser.add_argument('--results-preds', default='', type=str, metavar='FILENAME',
+                    help='Output csv file for validation results (summary)')
 parser.add_argument('--results-format', default='csv', type=str,
                     help='Format for results file one of (csv, json) (default: csv).')
 parser.add_argument('--real-labels', default='', type=str, metavar='FILENAME',
@@ -312,6 +315,7 @@ def validate(args):
     top5 = AverageMeter()
 
     model.eval()
+    class_predictions = []
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
@@ -338,6 +342,9 @@ def validate(args):
 
             if real_labels is not None:
                 real_labels.add_result(output)
+            
+            for i in range(input.size(0)):
+                class_predictions.append((batch_idx,i,output[i].cpu().numpy(), target[i].item()))
 
             # measure accuracy and record loss
             acc1, acc5 = accuracy(output.detach(), target, topk=(1, 5))
@@ -365,6 +372,10 @@ def validate(args):
                         top5=top5
                     )
                 )
+        if args.results_preds!= '':
+            import pandas as pd 
+            df = pd.DataFrame(class_predictions, columns=['batch_idx','id', 'output', 'target'])
+            df.to_csv(args.results_preds, index=False)
 
     if real_labels is not None:
         # real labels mode replaces topk values at the end

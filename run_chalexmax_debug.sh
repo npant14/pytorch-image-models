@@ -37,3 +37,4 @@ sh distributed_train.sh 2 train_skeleton.py \
     --input-size 3 227 227\
     --experiment chalexmax_v2.2_cl_0_ip_2_227_wd5e-8_9216_debug \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
+    

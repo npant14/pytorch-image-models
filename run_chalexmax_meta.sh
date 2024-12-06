@@ -10,7 +10,7 @@ for cl_lambda in "${cl_lambda_values[@]}"; do
     error_file="results/hmax_chalexmax_ip_${cl_lambda}_ip_2.err"
     
     # Create the job script for each cl-lambda value
-    cat << EOF > "job_script_227_2_ip_chalexmax_${cl_lambda}.sh"
+    cat << EOF > "job_script_322_2_ip_chalexmax_${cl_lambda}.sh"
 #!/bin/bash
 #SBATCH --time=160:00:00
 #SBATCH -p gpu --gres=gpu:2
@@ -31,8 +31,8 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
-    --model chalexmax \
-    --model-kwargs ip_scale_bands=2 classifier_input_size=9216 hmax_type='alexmax' \
+    --model chalexmax_v1 \
+    --model-kwargs ip_scale_bands=2 classifier_input_size=9216 hmax_type='alexmax_v1' \
     --cl-lambda ${cl_lambda} \
     --opt sgd \
     -b 128 \
@@ -46,13 +46,13 @@ sh distributed_train.sh 2 train_skeleton.py \
     --warmup-epochs 0 \
     --hflip 0.5 \
     --train-crop-mode rrc \
-    --input-size 3 227 227 \
-    --experiment chalexmax_227_cl_${cl_lambda}_ip_2_nearest \
-    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train
+    --input-size 3 322 322 \
+    --experiment noclamp_chalexmax_v1_322_cl_${cl_lambda}_ip_2_ \
+    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train_12_24_fix/
 EOF
 
     # Submit the job script
-    sbatch "job_script_227_2_ip_chalexmax_${cl_lambda}.sh"
+    sbatch "job_script_322_2_ip_chalexmax_${cl_lambda}.sh"
 
     # Optionally, remove the jo script after submission to clean up
     #rm "job_script_454_${cl_lambda}.sh"
