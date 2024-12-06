@@ -804,7 +804,7 @@ class ALEXMAX_v2_0(nn.Module):
         super(ALEXMAX_v2_0, self).__init__()
         self.s1 = S1(kernel_size=11, stride=4, padding=0)
         #self.s1_small = S1(kernel_size=11, stride=4, padding=0)
-        self.c1= C_scoring(96,nn.MaxPool2d(kernel_size =3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        self.c1= C_scoring(96,nn.MaxPool2d(kernel_size =6, stride = 3,padding=3), nn.MaxPool2d(kernel_size = 3, stride = 2))
         #self.s2b = S2b()
         #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
         self.s2 = S2(kernel_size=5, stride=1, padding=2)
@@ -841,8 +841,7 @@ class ALEXMAX_v2_0(nn.Module):
             return [x]
     def forward(self, x,pyramid=False):
         #resize image
-        out = [x,x] #  making always two scales
-        import pdb ;pdb.set_trace()
+        out = self.make_ip(x)
         ## should make SxBxCxHxW
         out = self.s1(out)
         #out_2 = self.s1_small([out[1]])
@@ -866,7 +865,7 @@ class ALEXMAX_v2_0(nn.Module):
 
         return out
      
-class ALEXMAX_v2_1(nn.Module):
+class ALEXMAX_v2_C(nn.Module):
     def __init__(self, num_classes=1000,big_size =322,small_size =227, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
         self.num_classes = num_classes
         self.in_chans = in_chans
@@ -876,12 +875,12 @@ class ALEXMAX_v2_1(nn.Module):
         self.pyramid = pyramid
         self.big_size = big_size
         self.small_size = small_size
-        super(ALEXMAX_v2_1, self).__init__()
+        super(ALEXMAX_v2_C, self).__init__()
 
 
         self.s1_big = S1(kernel_size=11, stride=4, padding=0)
         self.s1_small = S1(kernel_size=9, stride=4, padding=0)
-        self.c1= C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        self.c1= C(nn.MaxPool2d(kernel_size = 6, stride = 3,padding=3), nn.MaxPool2d(kernel_size = 3, stride = 2))
         #self.s2b = S2b()
         #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
         self.s2 = S2(kernel_size=5, stride=1, padding=2)
@@ -944,6 +943,84 @@ class ALEXMAX_v2_1(nn.Module):
 
         return out
 
+class ALEXMAX_v2_Cmid(nn.Module):
+    def __init__(self, num_classes=1000,big_size =322,small_size =227, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        self.big_size = big_size
+        self.small_size = small_size
+        super(ALEXMAX_v2_Cmid, self).__init__()
+
+
+        self.s1_big = S1(kernel_size=11, stride=4, padding=0)
+        self.s1_small = S1(kernel_size=9, stride=4, padding=0)
+        self.c1= C_mid(nn.MaxPool2d(kernel_size = 6, stride = 3,padding=3), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        #self.s2b = S2b()
+        #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s2 = S2(kernel_size=5, stride=1, padding=2)
+        self.c2 = C_mid(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s3 = S3()
+        self.global_pool =  C_mid(global_scale_pool=True)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU())
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU())
+        self.fc2= nn.Sequential(
+            nn.Linear(4096, num_classes))
+    def make_ip(self, x):
+        ## num_scale_bands = num images in IP - 1
+        #num_scale_bands = self.ip_scale_bands
+        #base_image_size = int(x.shape[-1])
+        #scale = 4   ## factor in exponenet
+
+        image_scales = [self.big_size,self.small_size]
+
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear').clamp(min=0, max=1)
+
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+        else:
+            return [x]
+    def forward(self, x,pyramid=False):
+        #resize image
+        # always making pyramid to start with only two scales. 
+        out = self.make_ip(x)
+        
+        ## should make SxBxCxHxW
+        out_1 = self.s1_big([out[0]])
+        out_2 = self.s1_small([out[1]])
+        out_c1 = self.c1([out_1[0],out_2[0]])
+        #bypass layers
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        if pyramid:
+            return out_c1[0],out_c2[0]
+
+        out = self.s3(out_c2)
+        out = self.global_pool(out)
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        if self.contrastive_loss:
+            return out, out_c1[0],out_c2[0]
+
+        return out
+    
 class ALEXMAX_v2_1_pr(nn.Module):
     def __init__(self, num_classes=1000,big_size =322,small_size =227, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
         self.num_classes = num_classes
@@ -1400,7 +1477,7 @@ def alexmax_v2(pretrained=False, **kwargs):
     return model
 
 @register_model
-def alexmax_v2_1(pretrained=False, **kwargs):
+def alexmax_v2_C(pretrained=False, **kwargs):
     #deleting some kwargs that are messing up training
     try:
         del kwargs["pretrained_cfg"]
@@ -1408,7 +1485,7 @@ def alexmax_v2_1(pretrained=False, **kwargs):
         del kwargs["drop_rate"]
     except:
         pass
-    model = ALEXMAX_v2_1(**kwargs)
+    model = ALEXMAX_v2_C(**kwargs)
     if pretrained:
         raise NotImplementedError
     return model
