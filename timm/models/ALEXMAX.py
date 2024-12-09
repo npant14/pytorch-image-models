@@ -981,7 +981,7 @@ class ALEXMAX_v2_Cmid(nn.Module):
         #base_image_size = int(x.shape[-1])
         #scale = 4   ## factor in exponenet
 
-        image_scales = [self.big_size,self.small_size]
+        image_scales = [self.small_size,self.big_size]
 
         if len(image_scales) > 1:
             image_pyramid = []
@@ -1432,7 +1432,19 @@ def alexmax_v0(pretrained=False, **kwargs):
     if pretrained:
         raise NotImplementedError
     return model
-
+@register_model
+def alexmax_v2_Cmid(pretrained=False, **kwargs):
+    #deleting some kwargs that are messing up training
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    model = ALEXMAX_v2_Cmid(**kwargs)
+    if pretrained:
+        raise NotImplementedError
+    return model
 
 @register_model
 def alexmax(pretrained=False, **kwargs):
