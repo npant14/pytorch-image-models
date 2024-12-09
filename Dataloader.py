@@ -1,189 +1,172 @@
 import os
-import pandas as pd
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
-import random
 import glob
-import cv2
 import numpy as np
+import pandas as pd
+import cv2
 import torch
 from torch.utils.data import Dataset, DataLoader
+from scipy.ndimage import label
 
-class RandomScaleBandDataset(Dataset):
-    def __init__(self):
+
+class ImageNetCustomDataset(Dataset):
+    def __init__(self, img_root, csv_file, label_map_file, mask_directory, img_dim=(224, 224)):
         """
+        Custom Dataset for ImageNet images with metadata and masks.
+
         Args:
-            image_dir, csv_path, wordnet_to_labels_path, transform=None, with_replacement=True
-            image_dir (str): Path to the directory containing subfolders with images.
-            csv_path (str): Path to the CSV containing class and scale bands.
-            wordnet_to_labels_path (str): Path to the WordNet ID to class name mapping file.
-            transform (callable, optional): Transform to apply to images.
-            with_replacement (bool, optional): Whether to sample with replacement. Default is True.
+        - img_root (str): Root directory containing image subfolders.
+        - csv_file (str): CSV file with image metadata and scale bands.
+        - label_map_file (str): File mapping WordNet IDs to class labels.
+        - mask_directory (str): Directory containing .npz mask files.
+        - img_dim (tuple): Target dimensions for resizing images (height, width).
         """
-        self.imgs_path= "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
-        file_list = golb.glob(self.imgs_path + "*")
-        print(file_list)
-        for class_path in file_list:
-            class_name = class_path.split("/")[-1]
-            for img_path in glob.glob(class_path + "/*.jpeg"):
-                self.data.append([img_path, class_name])
-        print(self.data)
-        #self.class_map = {""}
-        #self.image_dir = image_dir
-        #self.transform = transform
-        #self.with_replacement = with_replacement
+        self.img_root = img_root
+        self.img_dim = img_dim
+        self.mask_directory = mask_directory
 
-        # Load WordNet ID to class name mapping
-        print("Loading WordNet to class name mapping...")
-        self.wordnet_to_class = self._load_wordnet_to_labels(wordnet_to_labels_path)
+        # Load mapping of class names to WordNet IDs
+        self.class_to_wordnet = self._load_class_map(label_map_file)
 
-        # Load image metadata from the CSV
-        print("Loading image metadata from CSV...")
-        self.image_data = self._load_image_data(csv_path)
+        # Load metadata from the CSV file
+        self.data = pd.read_csv(csv_file)
 
-        # Resolve valid image paths and validate classes
-        print("Finding valid images...")
-        self.valid_image_files = self._find_valid_images()
+        # Normalize class names in the CSV
+        self.data['Class'] = self.data['Class'].str.replace("_", " ").str.lower()
 
-        # Filter the DataFrame based on valid images
-        print("Validating image data...")
-        self.image_data = self._validate_image_data()
+        # Dynamically load image paths and their WordNet IDs
+        self.img_files = self._load_image_paths()
 
-        # Expand the image data with full paths
-        print("Expanding image data...")
-        self.image_data = self.image_data.explode("Image Path").dropna(subset=["Image Path"])
+    @staticmethod
+    def _load_class_map(label_map_file):
+        """Load mapping of normalized class names to WordNet IDs."""
+        class_map = {}
+        with open(label_map_file, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    wordnet_id = parts[0]
+                    class_name = parts[2].replace("_", " ").lower()
+                    class_map[class_name] = wordnet_id
+        return class_map
 
-        # Class-to-index mapping
-        self.unique_classes = self.image_data["Class"].unique()
-        self.class_to_index = {cls: idx for idx, cls in enumerate(self.unique_classes)}
+    def _load_image_paths(self):
+        """Dynamically find all image paths and associate them with WordNet IDs."""
+        img_files = []
+        for folder_path in glob.glob(os.path.join(self.img_root, "*")):
+            if os.path.isdir(folder_path):
+                wordnet_id = os.path.basename(folder_path)
+                image_paths = glob.glob(os.path.join(folder_path, "*.jpeg"))
+                if not image_paths:
+                    print(f"Warning: No images found in {folder_path}.")
+                img_files.extend((img_path, wordnet_id) for img_path in image_paths)
+        if not img_files:
+            raise ValueError(f"No images found in {self.img_root}. Check folder structure.")
+        print(f"Loaded {len(img_files)} images from {self.img_root}.")
+        return img_files
 
-        # Image paths and corresponding classes
-        self.image_paths = self.image_data["Image Path"].tolist()
-        self.image_classes = self.image_data["Class"].tolist()
+    @staticmethod
+    def calculate_mask_centers(mask):
+        """Calculate the centers of all objects in the mask."""
+        centers = []
+        labeled_mask, num_objects = label(mask)
+        for object_id in range(1, num_objects + 1):
+            object_mask = labeled_mask == object_id
+            rows, cols = np.where(object_mask)
+            if len(rows) == 0 or len(cols) == 0:
+                continue
 
-        # Mapping for scale bands
-        self.scale_band_mapping = self.image_data.groupby("Class")["Scale Band"].apply(list).to_dict()
+            # Get bounding box and calculate diagonal center
+            top_left = (rows.min(), cols.min())
+            bottom_right = (rows.max(), cols.max())
+            row_center = (top_left[0] + bottom_right[0]) // 2
+            col_center = (top_left[1] + bottom_right[1]) // 2
 
-    def _load_wordnet_to_labels(self, path):
-        """Load WordNet to class name mapping."""
-        wordnet_to_labels = {}
-        try:
-            with open(path, 'r') as file:
-                for line in file:
-                    parts = line.strip().split()
-                    if len(parts) >= 3:
-                        wordnet_id = parts[0].strip()
-                        class_name = " ".join(parts[2:]).strip()
-                        wordnet_to_labels[wordnet_id] = class_name
-                    else:
-                        print(f"Skipping invalid line: {line.strip()}")
-        except Exception as e:
-            raise ValueError(f"Error reading WordNet ID to class name mapping file: {e}")
-        return wordnet_to_labels
-
-    def _load_image_data(self, path):
-        """Load and validate image data from CSV."""
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"CSV file not found: {path}")
-        try:
-            data = pd.read_csv(
-                path,
-                dtype={
-                    "Class": str,
-                    "Image ID": str,
-                    "Foreground Proportion": float,
-                    "Scale Band": int,
-                },
-            )
-            print(f"Loaded CSV with columns: {data.columns.tolist()}")
-            if "Class" not in data or "Scale Band" not in data:
-                raise ValueError("Required columns ('Class', 'Scale Band') are missing in CSV.")
-            return data
-        except Exception as e:
-            raise ValueError(f"Error reading CSV file: {e}")
-
-    def _find_valid_images(self):
-        """Find all valid images in the directory."""
-        valid_image_files = {}
-        for root, _, files in os.walk(self.image_dir):
-            folder_name = os.path.basename(root).strip()
-            class_name = self.wordnet_to_class.get(folder_name)
-            if class_name:
-                for file in files:
-                    if file.lower().endswith((".jpg", ".jpeg", ".png")):
-                        file_path = os.path.join(root, file)
-                        valid_image_files.setdefault(class_name, []).append(file_path)
-            else:
-                print(f"Skipping folder without matching WordNet ID: {folder_name}")
-        print(f"Found valid image files for classes: {list(valid_image_files.keys())}")
-        return valid_image_files
-
-    def _validate_image_data(self):
-        """Filter the DataFrame for valid image paths."""
-        if not set(self.image_data["Class"]).intersection(self.valid_image_files.keys()):
-            raise ValueError("No valid classes found. Ensure WordNet IDs match the folder structure and CSV file.")
-        self.image_data["Image Path"] = self.image_data["Class"].map(self.valid_image_files)
-        return self.image_data
+            centers.append((row_center, col_center))
+        return centers
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.img_files)
 
     def __getitem__(self, idx):
-        if self.with_replacement:
-            idx = random.randint(0, len(self.image_paths) - 1)
+        """
+        Fetch an image, its associated metadata, and mask centers.
 
-        img_path = self.image_paths[idx]
-        image_class = self.image_classes[idx]
-        scale_band = random.choice(self.scale_band_mapping[image_class])
+        Args:
+        - idx (int): Index of the image to retrieve.
 
-        try:
-            image = Image.open(img_path).convert("RGB")
-        except Exception as e:
-            raise ValueError(f"Error loading image at {img_path}: {e}")
+        Returns:
+        - img_tensor (torch.Tensor): Preprocessed image tensor (C x H x W).
+        - wordnet_id (str): WordNet ID associated with the image.
+        - scale_band_tensor (torch.Tensor): Scale band metadata as a tensor.
+        - mask_centers (list of tuples): Centers of the objects in the mask.
+        """
+        img_path, wordnet_id = self.img_files[idx]
 
-        if self.transform:
-            image = self.transform(image)
+        # Find the normalized class name for the WordNet ID
+        class_name = next((k for k, v in self.class_to_wordnet.items() if v == wordnet_id), None)
+        if class_name is None:
+            raise ValueError(f"WordNet ID '{wordnet_id}' does not map to any class.")
 
-        label = self.class_to_index[image_class]
+        # Retrieve the scale band from the normalized CSV metadata
+        row = self.data[self.data['Class'] == class_name]
+        if row.empty:
+            raise ValueError(f"No metadata found for class '{class_name}'.")
+        scale_band = int(row.iloc[0]['Scale Band'])
 
-        return {"image": image, "label": label, "scale_band": scale_band}
+        # Load and preprocess the image
+        img = self._load_image(img_path)
+
+        # Load the mask and calculate centers
+        mask_file = os.path.join(self.mask_directory, f"{os.path.basename(img_path).split('.')[0]}.npz")
+        if not os.path.exists(mask_file):
+            mask_centers = []  # No mask file found
+        else:
+            mask_data = np.load(mask_file)
+            if 'masks' in mask_data:
+                mask = mask_data['masks']
+                mask_centers = self.calculate_mask_centers(mask)
+            else:
+                mask_centers = []
+
+        # Convert scale band to a tensor
+        scale_band_tensor = torch.tensor(scale_band, dtype=torch.long)
+
+        return img, wordnet_id, scale_band_tensor, mask_centers
+
+    def _load_image(self, img_path):
+        """Load and preprocess an image from the given path."""
+        img = cv2.imread(img_path)
+        if img is None:
+            raise FileNotFoundError(f"Image not found: {img_path}")
+        img = cv2.resize(img, self.img_dim)
+        img_tensor = torch.from_numpy(img).permute(2, 0, 1).float()
+        return img_tensor
 
 
-def create_random_dataloader(image_dir, csv_path, wordnet_to_labels_path, batch_size, with_replacement=True, shuffle=True, num_workers=4):
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
-    dataset = RandomScaleBandDataset(
-        image_dir=image_dir,
-        csv_path=csv_path,
-        wordnet_to_labels_path=wordnet_to_labels_path,
-        transform=transform,
-        with_replacement=with_replacement,
-    )
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+# Define paths
+img_root = "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
+csv_file = "/oscar/scratch/vnema/foreground_proportions.csv"
+label_map_file = "/users/vnema/HMAX/SAM_Imagenet/sam2/wordnetids_to_labels.txt"
+mask_directory = "/users/vnema/scratch/ImageNet_Mask_npz"
 
+# Initialize dataset and DataLoader
+try:
+    dataset = ImageNetCustomDataset(img_root, csv_file, label_map_file, mask_directory)
+    print(f"Dataset initialized with {len(dataset)} images.")
+except ValueError as e:
+    print(f"Error initializing dataset: {e}")
+    exit(1)
 
-if __name__ == "__main__":
-    image_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
-    csv_path = "/oscar/scratch/vnema/foreground_proportions.csv"
-    wordnet_to_labels_path = "/users/vnema/HMAX/SAM_Imagenet/sam2/wordnetids_to_labels.txt"
+dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 
-    try:
-        dataloader = create_random_dataloader(
-            image_dir=image_dir,
-            csv_path=csv_path,
-            wordnet_to_labels_path=wordnet_to_labels_path,
-            batch_size=32,
-        )
-        for batch_idx, batch in enumerate(dataloader):
-            print(f"Batch {batch_idx + 1}:")
-            print(f"  Image Batch Shape: {batch['image'].shape}")
-            print(f"  Labels: {batch['label']}")
-            print(f"  Scale Bands: {batch['scale_band']}")
-            print("-" * 50)
-            if batch_idx == 2:
-                break
-    except Exception as e:
-        print(f"Error encountered: {e}")
+# Example usage: Iterate through DataLoader
+try:
+    for batch_idx, (images, wordnet_ids, scale_bands, mask_centers) in enumerate(dataloader):
+        print(f"Batch {batch_idx}:")
+        print(f"Images shape: {images.shape}")
+        print(f"WordNet IDs: {wordnet_ids}")
+        print(f"Scale Bands: {scale_bands}")
+        print(f"Mask Centers: {mask_centers}")
+        break
+except Exception as e:
+    print(f"Error during DataLoader iteration: {e}")
