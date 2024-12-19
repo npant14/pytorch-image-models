@@ -19,6 +19,7 @@ from contextlib import suppress
 from functools import partial
 
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.parallel
 
@@ -86,6 +87,10 @@ parser.add_argument('--img-size', default=None, type=int,
                     metavar='N', help='Input image dimension, uses model default if empty')
 parser.add_argument('--in-chans', type=int, default=None, metavar='N',
                     help='Image input channels (default: None => 3)')
+
+parser.add_argument('--image-scale', default=None, nargs=3, type=int,
+                    metavar='N N N', help='Input image scale before padding (d h w, e.g. --image-scale 3 224 224), uses model default if empty')
+
 parser.add_argument('--input-size', default=None, nargs=3, type=int,
                     metavar='N N N', help='Input all image dimensions (d h w, e.g. --input-size 3 224 224), uses model default if empty')
 parser.add_argument('--use-train-size', action='store_true', default=False,
@@ -151,9 +156,6 @@ scripting_group.add_argument('--aot-autograd', default=False, action='store_true
 
 parser.add_argument('--results-file', default='', type=str, metavar='FILENAME',
                     help='Output csv file for validation results (summary)')
-
-parser.add_argument('--results-preds', default='', type=str, metavar='FILENAME',
-                    help='Output csv file for validation results (summary)')
 parser.add_argument('--results-format', default='csv', type=str,
                     help='Format for results file one of (csv, json) (default: csv).')
 parser.add_argument('--real-labels', default='', type=str, metavar='FILENAME',
@@ -163,6 +165,24 @@ parser.add_argument('--valid-labels', default='', type=str, metavar='FILENAME',
 parser.add_argument('--retry', default=False, action='store_true',
                     help='Enable batch size decay & retry for single model validation')
 
+def pad_batch(images, target_size):
+    _, _, h, w = images.shape
+    target_h, target_w = target_size
+
+    # Calculate padding
+    pad_h = max(target_h - h, 0)
+    pad_w = max(target_w - w, 0)
+
+    # Calculate padding for each side
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    # Apply padding
+    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+
+    return padded_images
 
 def validate(args):
     # might as well try to validate something
@@ -206,6 +226,8 @@ def validate(args):
         in_chans = args.in_chans
     elif args.input_size is not None:
         in_chans = args.input_size[0]
+
+    #args.model_kwargs['channel_size'] = args.input_size[-1]
 
     model = create_model(
         args.model,
@@ -268,7 +290,7 @@ def validate(args):
     else:
         input_img_mode = args.input_img_mode
     dataset = create_dataset(
-        root=root_dir,
+        root=args.data_dir,
         name=args.dataset,
         split=args.split,
         download=args.dataset_download,
@@ -294,7 +316,8 @@ def validate(args):
     crop_pct = 1.0 if test_time_pool else data_config['crop_pct']
     loader = create_loader(
         dataset,
-        input_size=data_config['input_size'],
+        # input_size=data_config['input_size'],
+        input_size=args.image_scale, ##############make image smaller
         batch_size=args.batch_size,
         use_prefetcher=args.prefetcher,
         interpolation=data_config['interpolation'],
@@ -308,6 +331,24 @@ def validate(args):
         device=device,
         tf_preprocessing=args.tf_preprocessing,
     )
+    
+    target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
+
+    
+    # import numpy as np
+    # import matplotlib.pyplot as plt
+    
+    # images, _ = next(iter(loader))
+    # images = pad_batch(images, target_size)
+    
+    
+    # img = images[0]
+    # print(f"Image shape: {img.shape}")
+    # img_np = img.permute(1, 2, 0).cpu().numpy()
+    # img_np = np.clip(img_np, 0, 1)
+    # plt.imsave('sample_image.png', img_np)
+    # exit(0)
+
 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -315,7 +356,6 @@ def validate(args):
     top5 = AverageMeter()
 
     model.eval()
-    class_predictions = []
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
@@ -326,6 +366,9 @@ def validate(args):
 
         end = time.time()
         for batch_idx, (input, target) in enumerate(loader):
+            #####PADDING FOR VALIDATION################
+            input = pad_batch(input, target_size) # padding!!!
+
             if args.no_prefetcher:
                 target = target.to(device)
                 input = input.to(device)
@@ -336,15 +379,15 @@ def validate(args):
             with amp_autocast():
                 output = model(input)
 
+                if isinstance(output, (tuple, list)):
+                    output = output[0]
+
                 if valid_labels is not None:
                     output = output[:, valid_labels]
                 loss = criterion(output, target)
 
             if real_labels is not None:
                 real_labels.add_result(output)
-            
-            for i in range(input.size(0)):
-                class_predictions.append((batch_idx,i,output[i].cpu().numpy(), target[i].item()))
 
             # measure accuracy and record loss
             acc1, acc5 = accuracy(output.detach(), target, topk=(1, 5))
@@ -372,10 +415,6 @@ def validate(args):
                         top5=top5
                     )
                 )
-        if args.results_preds!= '':
-            import pandas as pd 
-            df = pd.DataFrame(class_predictions, columns=['batch_idx','id', 'output', 'target'])
-            df.to_csv(args.results_preds, index=False)
 
     if real_labels is not None:
         # real labels mode replaces topk values at the end

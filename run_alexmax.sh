@@ -34,6 +34,6 @@ sh distributed_train.sh 2 train_skeleton.py \
     --warmup-epochs 0 \
     --hflip 0.5\
     --train-crop-mode rrc\
-    --input-size 3 227 227\
-    --experiment alexmax_cl_0_ip_0_227_9216_control \
+    --input-size 3 322 322\
+    --experiment alexmax_cl_0_ip_1_322_9216_control \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
