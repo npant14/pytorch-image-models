@@ -70,7 +70,7 @@ for i, sample in enumerate(Image_dataset):
     plt.tight_layout()
     ax.set_title('Sample #{}'.format(i))
     ax.axis('off')
-    #show_landmarks(**sample)
+  
 
     if i == 3:
         plt.show()
