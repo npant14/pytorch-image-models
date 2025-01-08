@@ -45,9 +45,9 @@ class ScaledImagenetDataset(Dataset):
         # Extract scale band and mask centers
         scale_band = self.masks.iloc[idx]['Scale Band']
         mask_centers = self.masks.iloc[idx, 4:].values.astype(float)  # Assuming 'Center Row' and 'Center Column' start from column index 4
-
+        class_label = self.masks.iloc[idx, 0]
         # Create the sample dictionary
-        sample = {'image': image, 'scale_band': scale_band, 'mask_centers': mask_centers}
+        sample = {'image': image, 'class': class_label, 'scale_band': scale_band, 'mask_centers': mask_centers}
 
         if self.transform:
             sample = self.transform(sample)
@@ -64,7 +64,7 @@ Image_dataset = ScaledImagenetDataset(csv_file, img_root)
 fig = plt.figure()
 
 for i, sample in enumerate(Image_dataset):
-    print(i, sample['image'].shape, sample['mask_centers'], sample['scale_band'])
+    print(i, sample['image'].shape, sample['class'], sample['mask_centers'], sample['scale_band'])
 
     ax = plt.subplot(1, 4, i + 1)
     plt.tight_layout()
