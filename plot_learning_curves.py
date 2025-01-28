@@ -8,6 +8,7 @@ def plot_learning_curves(base_folder, pattern, output_file="learning_curves.html
     fig = go.Figure()
 
     # Scan through each folder within the base_folder that matches the pattern
+    # scan recursively through the base_folder
     for folder in os.listdir(base_folder):
         folder_path = os.path.join(base_folder, folder)
         if os.path.isdir(folder_path) and pattern in folder:
