@@ -586,9 +586,6 @@ def main():
             model.parameters(),
             lr = args.lr,
         )
-        # optimizer = schedulefree.ScheduleFreeWrapper(
-        #     optimizer
-        # )
     else:
         optimizer = create_optimizer_v2(
             model,
@@ -883,11 +880,16 @@ def main():
 
     # setup learning rate schedule and starting epoch
     updates_per_epoch = (len(loader_train) + args.grad_accum_steps - 1) // args.grad_accum_steps
-    lr_scheduler, num_epochs = create_scheduler_v2(
-        optimizer,
-        **scheduler_kwargs(args, decreasing_metric=decreasing_metric),
-        updates_per_epoch=updates_per_epoch,
-    )
+
+    if args.add_wrapped_schedulefree:
+        lr_scheduler = None
+        num_epochs = args.epochs
+    else:
+        lr_scheduler, num_epochs = create_scheduler_v2(
+            optimizer,
+            **scheduler_kwargs(args, decreasing_metric=decreasing_metric),
+            updates_per_epoch=updates_per_epoch,
+        )
     start_epoch = 0
     # if args.start_epoch is not None:
     #     # a specified start_epoch will always override the resume epoch
