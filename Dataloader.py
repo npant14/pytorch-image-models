@@ -10,18 +10,19 @@ from torchvision.utils import make_grid
 
 
 class ScaledImagenetDataset(Dataset):
-    """Scaled ImageNet dataset."""
-
-    def __init__(self, csv_file, root_dir, transform=None):
+   
+    def __init__(self, csv_file, root_dir, transform=None, crop_size=224):
         """
         Args:
             csv_file (str): Path to CSV file containing metadata.
             root_dir (str): Root directory containing all images.
             transform (callable, optional): Transformations applied to samples.
+            crop_size (int): The final crop size used in transformation (default 224).
         """
         self.data = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.transform = transform
+        self.crop_size = crop_size  # Store crop size for resized center calculation
 
     def __len__(self):
         return len(self.data)
@@ -56,8 +57,22 @@ class ScaledImagenetDataset(Dataset):
         mask_data = np.load(mask_path)
         mask = mask_data[mask_data.files[0]]
 
-        # Convert relative centers to tensor
-        relative_center = torch.tensor([relative_center_x, relative_center_y], dtype=torch.float32)
+        # Convert relative centers to actual pixel coordinates based on resized image
+        resized_h, resized_w = 256, 256  # Assuming Resize(256,256) applied before crop
+        crop_h, crop_w = self.crop_size, self.crop_size  # CenterCrop applied to 224x224
+
+        center_x = int(relative_center_x * resized_w)
+        center_y = int(relative_center_y * resized_h)
+
+        # Offset due to CenterCrop
+        offset_x = (resized_w - crop_w) // 2
+        offset_y = (resized_h - crop_h) // 2
+
+        # Calculate new resized center for cropped image
+        resized_center_x = center_x - offset_x
+        resized_center_y = center_y - offset_y
+
+        resized_center = torch.tensor([resized_center_x, resized_center_y], dtype=torch.float32)
 
         if self.transform:
             image = self.transform(image)
@@ -70,7 +85,7 @@ class ScaledImagenetDataset(Dataset):
             'image': image,
             'mask': mask,
             'scale_band': scale_band,
-            'relative_center': relative_center,
+            'resized_center': resized_center,
             'class_name': class_name
         }
         return sample
@@ -100,7 +115,7 @@ dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
 def show_batch(sample_batched, save_path=None):
     images_batch = sample_batched['image']
     masks_batch = sample_batched['mask']
-    centers_batch = sample_batched['relative_center']
+    centers_batch = sample_batched['resized_center']
     scale_bands_batch = sample_batched['scale_band']
     class_names_batch = sample_batched['class_name']
     batch_size = len(images_batch)
@@ -115,7 +130,7 @@ def show_batch(sample_batched, save_path=None):
     # Combine images and masks into one visualization
     fig, axs = plt.subplots(2, 1, figsize=(15, 10))
     axs[0].imshow(images_grid.numpy().transpose((1, 2, 0)))
-    axs[0].set_title("Images with Centers, Classes, and Scale Bands")
+    axs[0].set_title("Images with Resized Centers, Classes, and Scale Bands")
     axs[0].axis("off")
 
     axs[1].imshow(masks_grid.numpy().transpose((1, 2, 0)))
@@ -124,7 +139,7 @@ def show_batch(sample_batched, save_path=None):
 
     crop_size = 224
     for i in range(batch_size):
-        center_x, center_y = centers_batch[i].numpy() * crop_size
+        center_x, center_y = centers_batch[i].numpy()
         scale_band = scale_bands_batch[i].item()
         class_name = class_names_batch[i]
         grid_offset_x = i * (crop_size + grid_border_size)
@@ -140,14 +155,22 @@ def show_batch(sample_batched, save_path=None):
     else:
         plt.show()
 
-
 """
+# Print some sample outputs
 for i_batch, sample_batched in enumerate(dataloader):
-    print(f"Loaded batch {i_batch}")
-    if i_batch == 0:
+    print(f"\nBatch {i_batch}:")
+
+    for i in range(len(sample_batched['class_name'])):
+        print(f"  Sample {i}:")
+        print(f"    Class Name: {sample_batched['class_name'][i]}")
+        print(f"    Scale Band: {sample_batched['scale_band'][i]}")
+        print(f"    Resized Center: {sample_batched['resized_center'][i].tolist()}")
+
+    if i_batch == 0:  # Visualize the first batch
         output_dir = "output_figures"
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
         show_batch(sample_batched, save_path=save_path)
         break
+        
 """
