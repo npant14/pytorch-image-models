@@ -1,149 +1,138 @@
 import os
 import torch
 import pandas as pd
-from skimage import io, transform
-import numpy as np
-import matplotlib.pyplot as plt
+from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+from torchvision.utils import make_grid
 
 
 class ScaledImagenetDataset(Dataset):
+    """Scaled ImageNet dataset."""
+
     def __init__(self, csv_file, root_dir, transform=None):
         """
         Args:
-            csv_file (str): Path to CSV file with all foreground proportions and centers.
-            root_dir (str): Directory of all images.
-            transform (callable, optional): Optional transform to be applied on a sample.
+            csv_file (str): Path to CSV file containing metadata.
+            root_dir (str): Root directory containing all images.
+            transform (callable, optional): Transformations applied to samples.
         """
-        self.masks = pd.read_csv(csv_file)
+        self.data = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.transform = transform
 
     def __len__(self):
-        return len(self.masks)
+        return len(self.data)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        # Construct the image path from 'WordNet ID' and 'Image ID'
-        wordnet_id = self.masks.iloc[idx]['WordNet ID']
-        image_id = self.masks.iloc[idx]['Image ID']
-        img_name = os.path.join(self.root_dir, wordnet_id, f"{wordnet_id}_{image_id}.JPEG")
+        # Extract row values using iloc and idx
+        wordnet_id = self.data.iloc[idx, 0]
+        image_id = self.data.iloc[idx, 1]
+        img_relative_path = self.data.iloc[idx, 2]
+        mask_path = self.data.iloc[idx, 3]
+        class_name = self.data.iloc[idx, 4]
+        scale_band = int(self.data.iloc[idx, 5])
+        relative_center_x = float(self.data.iloc[idx, 6])
+        relative_center_y = float(self.data.iloc[idx, 7])
 
-        # Verify the file exists
-        if not os.path.isfile(img_name):
-            raise FileNotFoundError(f"File does not exist or is not an image: {img_name}")
+        # Construct full image path using root_dir
+        img_name = os.path.join(self.root_dir, img_relative_path)
 
-        # Load the image
-        try:
-            image = io.imread(img_name)
-        except Exception as e:
-            raise ValueError(f"Failed to load image {img_name}: {e}")
+        # Verify file existence
+        if not os.path.exists(img_name):
+            raise FileNotFoundError(f"Image file does not exist: {img_name}")
+        if not os.path.exists(mask_path):
+            raise FileNotFoundError(f"Mask file does not exist: {mask_path}")
 
-        # Extract scale band and relative centers
-        scale_band = self.masks.iloc[idx]['Scale Band']
-        rel_x = self.masks.iloc[idx]['Relative X']
-        rel_y = self.masks.iloc[idx]['Relative Y']
+        # Load image
+        image = Image.open(img_name).convert("RGB")
 
-        sample = {'image': image, 'scale_band': scale_band, 'relative_center': (rel_x, rel_y)}
+        # Load mask
+        mask_data = np.load(mask_path)
+        mask = mask_data[mask_data.files[0]]
+
+        # Convert relative centers to tensor
+        relative_center = torch.tensor([relative_center_x, relative_center_y], dtype=torch.float32)
 
         if self.transform:
-            sample = self.transform(sample)
+            image = self.transform(image)
+            mask = Image.fromarray(mask).convert("L")
+            mask = transforms.Resize((image.shape[1], image.shape[2]))(mask)
+            mask = torch.tensor(np.array(mask), dtype=torch.float32)
+            mask = torch.stack([mask] * 3, dim=0)
 
+        sample = {
+            'image': image,
+            'mask': mask,
+            'scale_band': scale_band,
+            'relative_center': relative_center,
+            'class_name': class_name
+        }
         return sample
 
 
-class CenterCrop(object):
-    def __init__(self, crop_size, resize_to=None):
-        if isinstance(crop_size, int):
-            self.crop_size = (crop_size, crop_size)
-        else:
-            self.crop_size = crop_size
-
-        if resize_to is not None:
-            if isinstance(resize_to, int):
-                self.resize_to = (resize_to, resize_to)
-            else:
-                self.resize_to = resize_to
-        else:
-            self.resize_to = None
-
-    def __call__(self, sample):
-        image, rel_center = sample['image'], sample['relative_center']
-
-        h, w = image.shape[:2]
-        crop_h, crop_w = self.crop_size
-
-        # Validate Relative X and Y
-        if not (0 <= rel_center[0] <= 1 and 0 <= rel_center[1] <= 1):
-            raise ValueError(f"Invalid relative center: {rel_center}")
-
-        # Calculate absolute crop center using relative coordinates
-        center_x = int(rel_center[0] * w)
-        center_y = int(rel_center[1] * h)
-
-        # Ensure crop box does not go out of bounds
-        left = max(center_x - crop_w // 2, 0)
-        top = max(center_y - crop_h // 2, 0)
-        right = min(center_x + crop_w // 2, w)
-        bottom = min(center_y + crop_h // 2, h)
-
-        # Perform the crop
-        image = image[top:bottom, left:right]
-
-        # Resize the cropped image, if specified
-        if self.resize_to is not None:
-            image = transform.resize(image, self.resize_to, anti_aliasing=True)
-
-        return {'image': image, 'scale_band': sample['scale_band'], 'relative_center': rel_center}
-
-
-
-class ToTensor(object):
-    def __call__(self, sample):
-        image = sample['image']
-
-        # Convert image to Tensor
-        image = image.transpose((2, 0, 1)) if len(image.shape) == 3 else image[np.newaxis, :, :]
-
-        return {
-            'image': torch.from_numpy(image).float(),
-            'scale_band': torch.tensor(sample['scale_band']).float(),
-            'relative_center': torch.tensor(sample['relative_center']).float()
-        }
-
-
 # Define transformations
-transformed_dataset = ScaledImagenetDataset(
-    csv_file="/oscar/scratch/vnema/Combined_scale_centers.csv",
-    root_dir="/gpfs/data/shared/imagenet/ILSVRC2012/train/",
-    transform=transforms.Compose([
-        CenterCrop(crop_size=224, resize_to=224),  # Use relative X, Y for cropping and resize
-        ToTensor()
-    ])
+transform_pipeline = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+    transforms.CenterCrop(224)
+])
+
+# Define dataset and DataLoader
+csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/imagenet_centers.csv"
+root_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
+
+dataset = ScaledImagenetDataset(
+    csv_file=csv_file,
+    root_dir=root_dir,
+    transform=transform_pipeline
 )
 
-# Create DataLoader
-dataloader = DataLoader(transformed_dataset, batch_size=10, shuffle=True, num_workers=2)
+dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
 
 
-# Helper function to show a batch of images with relative centers
+# Helper function to visualize a batch of images, masks, and centers
 def show_batch(sample_batched, save_path=None):
     images_batch = sample_batched['image']
+    masks_batch = sample_batched['mask']
     centers_batch = sample_batched['relative_center']
+    scale_bands_batch = sample_batched['scale_band']
+    class_names_batch = sample_batched['class_name']
     batch_size = len(images_batch)
     grid_border_size = 2
 
-    grid = utils.make_grid(images_batch, nrow=batch_size, padding=grid_border_size)
-    plt.imshow(grid.numpy().transpose((1, 2, 0)))
+    # Create grid of images
+    images_grid = make_grid(images_batch, nrow=batch_size, padding=grid_border_size)
 
+    # Create grid of masks
+    masks_grid = make_grid(masks_batch, nrow=batch_size, padding=grid_border_size)
+
+    # Combine images and masks into one visualization
+    fig, axs = plt.subplots(2, 1, figsize=(15, 10))
+    axs[0].imshow(images_grid.numpy().transpose((1, 2, 0)))
+    axs[0].set_title("Images with Centers, Classes, and Scale Bands")
+    axs[0].axis("off")
+
+    axs[1].imshow(masks_grid.numpy().transpose((1, 2, 0)))
+    axs[1].set_title("Masks")
+    axs[1].axis("off")
+
+    crop_size = 224
     for i in range(batch_size):
-        center_x, center_y = centers_batch[i].numpy() * np.array([224, 224])  # Assuming 224x224 crop size
-        plt.scatter(center_x + i * (224 + grid_border_size), center_y + grid_border_size, s=10, marker='o', c='r')
+        center_x, center_y = centers_batch[i].numpy() * crop_size
+        scale_band = scale_bands_batch[i].item()
+        class_name = class_names_batch[i]
+        grid_offset_x = i * (crop_size + grid_border_size)
+        grid_offset_y = grid_border_size
 
-    plt.title('Batch from DataLoader')
+        axs[0].scatter(center_x + grid_offset_x, center_y + grid_offset_y, s=20, marker='o', c='r')
+        axs[0].text(grid_offset_x + crop_size / 2, grid_offset_y - 10, f"Scale: {scale_band}\nClass: {class_name}",
+                    ha='center', color='white', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
 
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
@@ -152,17 +141,13 @@ def show_batch(sample_batched, save_path=None):
         plt.show()
 
 
-# Save or display a batch from DataLoader
-output_dir = "output_figures"
-os.makedirs(output_dir, exist_ok=True)
-
+"""
 for i_batch, sample_batched in enumerate(dataloader):
-    print(f"Batch {i_batch}:")
-    print(f"  Image batch size: {sample_batched['image'].size()}")
-
-    if i_batch == 2:
+    print(f"Loaded batch {i_batch}")
+    if i_batch == 0:
+        output_dir = "output_figures"
+        os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
-        plt.figure(figsize=(10, 10))
         show_batch(sample_batched, save_path=save_path)
         break
-
+"""
