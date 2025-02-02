@@ -16,7 +16,7 @@ from ._registry import register_model, generate_default_cfgs
 from .RESMAX import Residual, S1_Res_Big, S1_Res_Small, S3_Res, C, C_scoring
 
 class Inception(nn.Module):
-    def __init__(self, in_channels, out_channels, conv_type='use5x5', **kwargs):
+    def __init__(self, in_channels, out_channels, conv_type='double3x3', **kwargs):
         """
         Args:
             in_channels: Number of input channels
@@ -89,7 +89,7 @@ class Inception(nn.Module):
 
 
 class S2_Inception(nn.Module):
-    def __init__(self, conv_type='use5x5', **kwargs):
+    def __init__(self, conv_type='double3x3', **kwargs):
         super(S2_Inception, self).__init__()
         self.layer = nn.Sequential(
             Inception(96, 128, conv_type),  # Input from C1 (96 channels)
