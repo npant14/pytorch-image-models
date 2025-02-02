@@ -5,11 +5,12 @@ An implementation of HMAX:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 import numpy as np
 import scipy as sp
 import time
 import pdb
-
+import random
 from ._builder import build_model_with_cfg
 from ._manipulate import checkpoint_seq
 from ._registry import register_model, generate_default_cfgs
@@ -17,6 +18,21 @@ from .HMAX import HMAX_from_Alexnet, HMAX_from_Alexnet_bypass,get_ip_scales,pad_
 from .ALEXMAX import S1, S2, S3, C, C_scoring, ConvScoring, soft_selection
 
 class C_scoring2(nn.Module):
+    """
+    C layer with learnable scoring function. 
+    This layer is used in the ALEXMAX_v3 model.
+    It resizes the image then applies convolutional filtering to the resized images.
+    The scores are computed using a learnable scoring function.
+    
+    Args:
+        num_channels (int): Number of input channels
+        pool_func1 (nn.Module): Pooling function for the first input
+        pool_func2 (nn.Module): Pooling function for the second input
+        global_scale_pool (bool): Whether to use global scale pooling
+        
+    
+    """
+    
     # Spatial then Scale
     def __init__(self,
                  num_channels,
@@ -61,7 +77,7 @@ class C_scoring2(nn.Module):
 
         else:  # Not global pool
             if len(x_pyramid) == 1:
-                pooled = self.pool1(x_pyramid[0])
+                pooled = self.pool2(x_pyramid[0])
                 _ = self.scoring_conv(pooled)
                 return [pooled]
 
@@ -93,6 +109,15 @@ class C_scoring2(nn.Module):
     
     
 class ALEXMAX_v3(nn.Module):
+    """
+    ALEXMAX_v3 model. This model is an implementation of the HMAX model.
+    It is based on the ALEXNET architecture.
+    Implement only one S1 layer. The C1 layer is replaced with a learnable scoring function.
+    Also it has resizing layers and a learnable scoring function.
+    
+    
+    """
+    
     def __init__(self, num_classes=1000,base_size =322, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False, **kwargs):
         self.num_classes = num_classes
         self.in_chans = in_chans
@@ -170,6 +195,63 @@ class ALEXMAX_v3(nn.Module):
 
         return out
     
+class CHALEXMAX3(nn.Module):
+    def __init__(self, num_classes=1000,
+                 base_size =322, 
+                 in_chans=3, 
+                 teacher_scale_bands=1,
+                  student_scale_bands =3,
+                 classifier_input_size=13312,
+                **kwargs):
+        super(CHALEXMAX3, self).__init__()
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = True # this tells the trainer to expect a contrastive loss
+        self.base_size = base_size
+        self.student_scale_bands = student_scale_bands
+        self.teacher_scale_bands = teacher_scale_bands
+        self.classifier_input_size = classifier_input_size
+        self.teacher = ALEXMAX_v3(base_size =base_size,
+                                  ip_scale_bands = teacher_scale_bands,
+                                  classifier_input_size=classifier_input_size, 
+                                  contrastive_loss=True,pyramid=False)
+        self.student = ALEXMAX_v3(base_size =base_size, 
+                                  ip_scale_bands=student_scale_bands,
+                                  classifier_input_size=classifier_input_size, 
+                                  contrastive_loss=True,pyramid=False)
+    
+    def augment(self, x):
+        scale_factor_list =   np.arange(-self.student_scale_bands//2 + 1, self.student_scale_bands//2 + 2) #[0.707, 0.841, 1, 1.189, 1.414]
+        scale_factor_list = [2**(i/4) for i in scale_factor_list]
+        
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw*scale_factor)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        elif new_hw > img_hw:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        return x_rescaled
+    def correct_size(self, student_features,teacher_features):
+        
+        if student_features.shape[-1] > teacher_features.shape[-1]:
+            center_crop = torchvision.transforms.CenterCrop(teacher_features.shape[-1])
+            student_features = center_crop(student_features)
+        elif student_features.shape[-1] < teacher_features.shape[-1]:
+            student_features = pad_to_size(student_features, (teacher_features.shape[-1], teacher_features.shape[-1]))
+        return student_features
+    def forward(self, x):
+        
+        out_teacher, stream_teacher_c1, stream_teacher_c2 = self.teacher(x)
+        x_rescaled = self.augment(x)
+        out_student, stream_student_c1, stream_student_c2 = self.student(x_rescaled)
+        out = out_teacher/2 + out_student / 2 
+        stream_student_c1 = self.correct_size(stream_student_c1, stream_teacher_c1)
+        stream_student_c2 = self.correct_size(stream_student_c2, stream_teacher_c2)
+        correct_scale_loss = F.mse_loss(stream_teacher_c1, stream_student_c1) + F.mse_loss(stream_teacher_c2, stream_student_c2)
+        return out, correct_scale_loss
     
 @register_model
 def alexmax_v3(pretrained=False, **kwargs):
@@ -182,4 +264,17 @@ def alexmax_v3(pretrained=False, **kwargs):
     if pretrained:
        raise ValueError("No pretrained model available for ALEXMAX_v3")
     model = ALEXMAX_v3(**kwargs)
+    return model
+
+@register_model
+def chalexmax_v3(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    if pretrained:
+       raise ValueError("No pretrained model available for CHALEXMAX3")
+    model = CHALEXMAX3(**kwargs)
     return model
