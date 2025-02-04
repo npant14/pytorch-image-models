@@ -80,7 +80,7 @@ except ImportError as e:
 has_compile = hasattr(torch, 'compile')
 
 _logger = logging.getLogger('train')
-
+print('parsing new function ')
 # First arg parser: for the config file.
 config_parser = argparse.ArgumentParser(description='Training Config', add_help=False)
 config_parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
@@ -171,6 +171,8 @@ group.add_argument('--student-kwargs', nargs='*', default={}, action=utils.Parse
 # New arguments for student scaling and KL divergence.
 group.add_argument('--student-scale-bands', type=int, default=4,
                    help='Integer that controls the range of scaling factors for the student input.')
+group.add_argument('--teacher-scale-bands', type=int, default=1)
+
 group.add_argument('--kl-lambda', type=float, default=1.0,
                    help='Weight for the KL divergence loss between student and teacher outputs.')
 
@@ -274,22 +276,63 @@ def _parse_args():
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     return args, args_text
 
-# --- Helper function for student rescaling ---
-def random_rescale(input_tensor, student_scale_bands):
-    """
-    Given an input batch tensor [B, C, H, W], randomly rescale the images.
-    The scale factors are computed as:
-      scale_factor_list = np.arange(-student_scale_bands//2 + 1, student_scale_bands//2 + 2)
-      scale_factor_list = [2**(i/4) for i in scale_factor_list]
-    """
-    scale_factors = np.arange(-student_scale_bands//2 + 1, student_scale_bands//2 + 2)
-    scale_factors = [2**(i/4) for i in scale_factors]
-    factor = random.choice(scale_factors)
-    new_h = int(input_tensor.size(2) * factor)
-    new_w = int(input_tensor.size(3) * factor)
-    return F.interpolate(input_tensor, size=(new_h, new_w), mode='bilinear', align_corners=False)
+def pad_to_size(a, size):
+    current_size = (a.shape[-2], a.shape[-1])
+    total_pad_h = size[0] - current_size[0]
+    pad_top = total_pad_h // 2
+    pad_bottom = total_pad_h - pad_top
 
-# --- Training loop for teacher and student ---
+    total_pad_w = size[1] - current_size[1]
+    pad_left = total_pad_w // 2
+    pad_right = total_pad_w - pad_left
+
+    a = nn.functional.pad(a, (pad_left, pad_right, pad_top, pad_bottom))
+
+    return a
+
+# --- Helper function for student rescaling ---
+def random_rescale(x, student_scale_bands):
+    """
+    Randomly rescales the input tensor x (shape: [B, C, H, W]) using a range of scale factors
+    computed from student_scale_bands. If the rescaled image is smaller than the original size,
+    it is padded. If larger, it is center-cropped.
+    
+    Args:
+        x (Tensor): Input tensor with shape [B, C, H, W] where H == W.
+        student_scale_bands (int): Controls the range of scaling factors. For example, if set to 4,
+                                   the scale factors will be computed as:
+                                     np.arange(-student_scale_bands//2 + 1, student_scale_bands//2 + 2)
+                                     scale_factor_list = [2**(i/4) for i in scale_factor_list]
+    
+    Returns:
+        Tensor: The augmented tensor, with the same spatial dimensions as the input.
+    """
+    # Compute scale factors.
+    scale_factor_list = np.arange(-student_scale_bands // 2 + 1,
+                                  student_scale_bands // 2 + 2)
+    scale_factor_list = [2 ** (i / 4) for i in scale_factor_list]
+    
+    # Randomly select a scale factor.
+    scale_factor = random.choice(scale_factor_list)
+    
+    # Get original spatial dimensions.
+    img_hw = x.shape[-1]  # Assuming square images.
+    new_hw = int(img_hw * scale_factor)
+    
+    # Rescale the image using bilinear interpolation.
+    x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+    x_rescaled = x_rescaled.clamp(min=0, max=1)
+    
+    # If the new size is smaller, pad to the original size.
+    if new_hw <= img_hw:
+        x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+    # If the new size is larger, center-crop to the original size.
+    else:
+        center_crop = torchvision.transforms.CenterCrop(img_hw)
+        x_rescaled = center_crop(x_rescaled)
+    
+    return x_rescaled
+    
 def train_one_epoch(
         epoch,
         teacher_model,
@@ -304,9 +347,16 @@ def train_one_epoch(
         lr_scheduler_teacher=None,
         lr_scheduler_student=None,
 ):
+    teacher_model = teacher_model.to(device)
+    student_model = student_model.to(device)
     teacher_model.train()
     student_model.train()
-    losses_m = utils.AverageMeter()
+    
+    # Create separate average meters for each loss.
+    total_losses_m = utils.AverageMeter()
+    teacher_losses_m = utils.AverageMeter()
+    student_losses_m = utils.AverageMeter()
+    kl_losses_m = utils.AverageMeter()
     batch_time_m = utils.AverageMeter()
 
     end = time.time()
@@ -315,84 +365,132 @@ def train_one_epoch(
         input = input.to(device)
         target = target.to(device)
         
-        # Teacher gets original sample.
+        # Teacher receives the original image.
         teacher_output = teacher_model(input)
         # Student receives a randomly rescaled version.
         student_input = random_rescale(input, args.student_scale_bands)
+        student_input = student_input.to(device)
         student_output = student_model(student_input)
         
-        # Compute losses.
+        # Compute individual losses.
         teacher_loss = loss_fn(teacher_output, target)
         student_loss = loss_fn(student_output, target)
         kl_loss = kl_loss_fn(F.log_softmax(student_output, dim=1),
                              F.softmax(teacher_output, dim=1))
         total_loss = teacher_loss + student_loss + args.kl_lambda * kl_loss
 
+        # Backpropagation.
         total_loss.backward()
         teacher_optimizer.step()
         student_optimizer.step()
         teacher_optimizer.zero_grad()
         student_optimizer.zero_grad()
 
-        losses_m.update(total_loss.item(), input.size(0))
+        # Update the meters.
+        total_losses_m.update(total_loss.item(), input.size(0))
+        teacher_losses_m.update(teacher_loss.item(), input.size(0))
+        student_losses_m.update(student_loss.item(), input.size(0))
+        kl_losses_m.update(kl_loss.item(), input.size(0))
         batch_time_m.update(time.time() - end)
         end = time.time()
 
+        # Log metrics every log_interval batches.
         if utils.is_primary(args) and batch_idx % args.log_interval == 0:
             lrl = [param_group['lr'] for param_group in teacher_optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
             _logger.info(
                 f'Train Epoch: {epoch} [{batch_idx}/{len(loader)}]  '
-                f'Loss: {losses_m.val:.4f} ({losses_m.avg:.4f})  '
+                f'Total Loss: {total_losses_m.val:.4f} ({total_losses_m.avg:.4f})  '
+                f'Teacher Loss: {teacher_losses_m.val:.4f} ({teacher_losses_m.avg:.4f})  '
+                f'Student Loss: {student_losses_m.val:.4f} ({student_losses_m.avg:.4f})  '
+                f'KL Loss: {kl_losses_m.val:.4f} ({kl_losses_m.avg:.4f})  '
                 f'LR: {lr:.3e}  '
                 f'Time: {batch_time_m.val:.3f}s'
             )
-    return OrderedDict([('loss', losses_m.avg)])
+            
+    # Return a dictionary with the separate metrics.
+    return OrderedDict([
+        ('total_loss', total_losses_m.avg),
+        ('teacher_loss', teacher_losses_m.avg),
+        ('student_loss', student_losses_m.avg),
+        ('kl_loss', kl_losses_m.avg)
+    ])
 
 def validate(
-        model,
-        loader,
-        loss_fn,
-        args,
-        device=torch.device('cuda'),
-        log_suffix=''
+    teacher_model,
+    student_model,
+    loader,
+    loss_fn,
+    args,
+    device=torch.device('cuda'),
+    log_suffix=''
 ):
-    model.eval()
-    losses_m = utils.AverageMeter()
-    top1_m = utils.AverageMeter()
-    top5_m = utils.AverageMeter()
+    teacher_model.eval()
+    student_model.eval()
+    
+    # Meters for teacher metrics.
+    teacher_losses_m = utils.AverageMeter()
+    teacher_top1_m = utils.AverageMeter()
+    teacher_top5_m = utils.AverageMeter()
+    
+    # Meters for student metrics.
+    student_losses_m = utils.AverageMeter()
+    student_top1_m = utils.AverageMeter()
+    student_top5_m = utils.AverageMeter()
+    
     batch_time_m = utils.AverageMeter()
-
     end = time.time()
     last_idx = len(loader) - 1
+    
     with torch.no_grad():
         for batch_idx, (input, target) in enumerate(loader):
             input = input.to(device)
             target = target.to(device)
             if args.channels_last:
                 input = input.contiguous(memory_format=torch.channels_last)
-
-            output = model(input)
-            if isinstance(output, (tuple, list)):
-                output = output[0]
-            loss = loss_fn(output, target)
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
-            losses_m.update(loss.item(), input.size(0))
-            top1_m.update(acc1.item(), input.size(0))
-            top5_m.update(acc5.item(), input.size(0))
+            
+            # --- Teacher evaluation (original input) ---
+            teacher_output = teacher_model(input)
+            teacher_loss = loss_fn(teacher_output, target)
+            teacher_acc1, teacher_acc5 = utils.accuracy(teacher_output, target, topk=(1, 5))
+            teacher_losses_m.update(teacher_loss.item(), input.size(0))
+            teacher_top1_m.update(teacher_acc1.item(), input.size(0))
+            teacher_top5_m.update(teacher_acc5.item(), input.size(0))
+            
+            # --- Student evaluation (rescaled input) ---
+            student_input = random_rescale(input, args.student_scale_bands)
+            student_output = student_model(student_input)
+            student_loss = loss_fn(student_output, target)
+            student_acc1, student_acc5 = utils.accuracy(student_output, target, topk=(1, 5))
+            student_losses_m.update(student_loss.item(), input.size(0))
+            student_top1_m.update(student_acc1.item(), input.size(0))
+            student_top5_m.update(student_acc5.item(), input.size(0))
+            
             batch_time_m.update(time.time() - end)
             end = time.time()
+            
             if utils.is_primary(args) and (batch_idx % args.log_interval == 0 or batch_idx == last_idx):
                 _logger.info(
                     f'Test{log_suffix}: [{batch_idx}/{last_idx}]  '
                     f'Time: {batch_time_m.val:.3f}s ({batch_time_m.avg:.3f}s)  '
-                    f'Loss: {losses_m.val:.4f} ({losses_m.avg:.4f})  '
-                    f'Acc@1: {top1_m.val:.3f} ({top1_m.avg:.3f})  '
-                    f'Acc@5: {top5_m.val:.3f} ({top5_m.avg:.3f})'
+                    f'Teacher Loss: {teacher_losses_m.val:.4f} ({teacher_losses_m.avg:.4f})  '
+                    f'Teacher Acc@1: {teacher_top1_m.val:.3f} ({teacher_top1_m.avg:.3f})  '
+                    f'Teacher Acc@5: {teacher_top5_m.val:.3f} ({teacher_top5_m.avg:.3f})  '
+                    f'Student Loss: {student_losses_m.val:.4f} ({student_losses_m.avg:.4f})  '
+                    f'Student Acc@1: {student_top1_m.val:.3f} ({student_top1_m.avg:.3f})  '
+                    f'Student Acc@5: {student_top5_m.val:.3f} ({student_top5_m.avg:.3f})'
                 )
-
-    metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    
+    metrics = OrderedDict([
+        ('teacher_loss', teacher_losses_m.avg),
+        ('teacher_top1', teacher_top1_m.avg),
+        ('teacher_top5', teacher_top5_m.avg),
+        ('student_loss', student_losses_m.avg),
+        ('student_top1', student_top1_m.avg),
+        ('student_top5', student_top5_m.avg),
+    ])
     return metrics
+
 
 def main():
     utils.setup_default_logging()
@@ -623,6 +721,7 @@ def main():
                 # Validate teacher model only.
                 eval_metrics = validate(
                     teacher_model,
+                    student_model,
                     loader_eval,
                     validate_loss_fn,
                     args,
@@ -641,7 +740,7 @@ def main():
                     log_wandb=False,
                 )
 
-            latest_metric = eval_metrics['loss'] if eval_metrics is not None else train_metrics['loss']
+            latest_metric = eval_metrics['student_loss'] if eval_metrics is not None else train_metrics['student_loss']
             if saver is not None:
                 best_metric, best_epoch = saver.save_checkpoint(epoch, metric=latest_metric)
 

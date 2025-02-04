@@ -20,7 +20,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model alexmax_v3 \
-    --model-kwargs ip_scale_bands=2 classifier_input_size=9216 hmax_type='alexmax_v3' \
+    --model-kwargs ip_scale_bands=3 classifier_input_size=9216 hmax_type='alexmax_v3' \
     --cl-lambda 1\
     --opt sgd \
     -b 128 \
@@ -35,7 +35,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment resize_alexmax_v3_cl_1_ip_2_322_9216 \
+    --experiment resize2_alexmax_v3_cl_1_ip_3_322_9216 \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/1_25/\
     
  
