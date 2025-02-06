@@ -141,7 +141,6 @@ def get_ip_scales(num_scale_bands, base_image_size, scale=4):
     image_scales.sort()
     if num_scale_bands > 2:
         assert(len(image_scales) == num_scale_bands + 1)
-    
     return image_scales
     
 
@@ -155,13 +154,38 @@ class S1(nn.Module):
     def __init__(self):
         super(S1, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=0),
+            nn.Conv2d(3, 96, kernel_size=11, stride=4),
             nn.BatchNorm2d(96),
             nn.ReLU())
     
     def forward(self, x_pyramid):
         # get dimensions
         return [self.layer1(x) for x in x_pyramid]
+
+class S2b_block(nn.Module):
+    def __init__(self, kernel_size, num_convs):
+        super(S2b_block, self).__init__()
+        self.s2b_block = nn.ModuleList()
+        self.s2b_block.append(nn.Sequential(
+            nn.Conv2d(96, 64, kernel_size=kernel_size, stride=1, padding=kernel_size//2),
+            nn.BatchNorm2d(64, 1e-3),
+            nn.ReLU(True)
+        ))
+        for _ in range(num_convs - 1):
+            self.s2b_block.append(nn.Sequential(
+                nn.Conv2d(64, 64, kernel_size=kernel_size, stride=1, padding=kernel_size//2),
+                nn.BatchNorm2d(64, 1e-3),
+                nn.ReLU(True)
+            ))
+        
+    def forward(self, x):
+        out = x
+        outshape = out.shape[-2:]
+        for block in self.s2b_block:
+            out = block(out)
+        ## this line is to force fix off by 1 errors in sizing due to rounding
+        out = F.interpolate(out, size = outshape, mode = 'bilinear')
+        return out
 
 class S2b(nn.Module):
     def __init__(self):
@@ -170,11 +194,7 @@ class S2b(nn.Module):
         self.s2b_kernel_size=[4,8,12,16]
         self.s2b_seqs = nn.ModuleList()
         for size in self.s2b_kernel_size:
-            self.s2b_seqs.append(nn.Sequential(
-                nn.Conv2d(96, 64, kernel_size=size, stride=1, padding=size//2),
-                nn.BatchNorm2d(64, 1e-3),
-                nn.ReLU(True)
-            ))
+            self.s2b_seqs.append(S2b_block(kernel_size=4, num_convs=size//4))
     
     def forward(self, x_pyramid):
         # get dimensions
@@ -216,39 +236,6 @@ class S3(nn.Module):
         # get dimensions
         return [self.layer(x) for x in x_pyramid]
 
-# class C(nn.Module):
-#     ## Scale then Spatial
-#     def __init__(self, pool_func = nn.MaxPool2d(kernel_size = 3, stride = 2)):
-#         super(C, self).__init__()
-#         ## TODO: Add arguments for kernel_sizes
-#         self.pool = pool_func
-#     def forward(self,x_pyramid):
-#         # if only one thing in pyramid, return
-
-#         if len(x_pyramid) == 1:
-#             return [self.pool(x_pyramid[0])]
-
-#         out = []
-
-#         for i in range(0, len(x_pyramid) - 1):
-#             x_1 = x_pyramid[i]
-#             x_2 = x_pyramid[i+1]
-#             # First interpolating such that feature points match spatially
-#             if x_1.shape[-1] > x_2.shape[-1]:
-#                 x_2 = F.interpolate(x_2, size = x_1.shape[-2:], mode = 'bilinear')
-#             else:
-#                 x_1 = F.interpolate(x_1, size = x_2.shape[-2:], mode = 'bilinear')
-
-#             x = torch.stack([x_1, x_2], dim=4)
-#             to_append, _ = torch.max(x, dim=4)
-            
-#             #spatial pooling
-#             to_append = self.pool(to_append)
-#             out.append(to_append)
-
-#         return out
-
-
 class C(nn.Module):
     #Spatial then Scale
     def __init__(self,
@@ -263,7 +250,6 @@ class C(nn.Module):
 
     def forward(self,x_pyramid):
         # if only one thing in pyramid, return
-
 
         out = []
         if self.global_scale_pool:
@@ -308,7 +294,7 @@ class C(nn.Module):
 
 
 class HMAX_from_Alexnet(nn.Module):
-    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False):
+    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=0, classifier_input_size=13312, contrastive_loss=False):
         self.num_classes = num_classes
         self.in_chans = in_chans
         #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
@@ -320,7 +306,8 @@ class HMAX_from_Alexnet(nn.Module):
         self.layer1 = S1()
         self.pool1 = C()
         self.S2b = S2b()
-        self.C2b = C(nn.MaxPool2d(kernel_size = 10, stride = 5), nn.MaxPool2d(kernel_size = 12, stride = 6), global_scale_pool=True)
+        # self.C2b = C(nn.MaxPool2d(kernel_size = 10, stride = 5), nn.MaxPool2d(kernel_size = 12, stride = 6), global_scale_pool=True)
+        self.C2b = C(global_scale_pool=True)
 
         self.layer2 = S2()
         self.pool2 = C()
@@ -365,7 +352,7 @@ class HMAX_from_Alexnet(nn.Module):
         out = self.layer1(out) #s1
         out = self.pool1(out) #c1
 
-        #bypass layers
+        # #bypass layers
         bypass = self.S2b(out)
         bypass = self.C2b(bypass)
         
