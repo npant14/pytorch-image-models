@@ -77,6 +77,8 @@ try:
 except ImportError as e:
     has_functorch = False
 
+torch.autograd.set_detect_anomaly(True)
+
 has_compile = hasattr(torch, 'compile')
 
 _logger = logging.getLogger('train')
@@ -387,13 +389,13 @@ def train_one_epoch(
         scale_band = scale_band.to(device)
         # Teacher receives the original image.
         teacher_output = teacher_model(input)
-        # Student receives a randomly rescaled version.
-        input = random_rescale(input, pick_scale=scale_band)
-        #student_input = student_input.to(device)
-        student_output = student_model(input)
-        
-        # Compute individual losses.
         teacher_loss = loss_fn(teacher_output, target)
+        
+        
+        student_input = random_rescale(input.clone(), pick_scale=scale_band)
+        student_input = student_input.to(device)
+        student_output = student_model(student_input)
+        
         student_loss = loss_fn(student_output, target)
         kl_loss = kl_loss_fn(F.log_softmax(student_output, dim=1),
                              F.softmax(teacher_output, dim=1))
