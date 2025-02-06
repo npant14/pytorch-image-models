@@ -73,6 +73,8 @@ class ScaledImagenetDataset(Dataset):
             mask = transforms.CenterCrop(322)(mask)
 
         sample = {
+            'class_id':wordnet_id,
+            'image_id':image_id,
             'image': image,
             'mask': mask,
             'scale_band': scale_band,
