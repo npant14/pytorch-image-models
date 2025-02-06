@@ -9,6 +9,7 @@ Hacked together by Ross Wightman (https://github.com/rwightman)
 """
 import argparse
 import csv
+import random
 import glob
 import json
 import logging
@@ -17,6 +18,9 @@ import time
 from collections import OrderedDict
 from contextlib import suppress
 from functools import partial
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
+import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -28,6 +32,8 @@ from timm.layers import apply_test_time_pool, set_fast_norm
 from timm.models import create_model, load_checkpoint, is_model, list_models
 from timm.utils import accuracy, AverageMeter, natural_key, setup_default_logging, set_jit_fuser, \
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
+
+from pad import *
 
 try:
     from apex import amp
@@ -165,24 +171,7 @@ parser.add_argument('--valid-labels', default='', type=str, metavar='FILENAME',
 parser.add_argument('--retry', default=False, action='store_true',
                     help='Enable batch size decay & retry for single model validation')
 
-def pad_batch(images, target_size):
-    _, _, h, w = images.shape
-    target_h, target_w = target_size
 
-    # Calculate padding
-    pad_h = max(target_h - h, 0)
-    pad_w = max(target_w - w, 0)
-
-    # Calculate padding for each side
-    pad_top = pad_h // 2
-    pad_bottom = pad_h - pad_top
-    pad_left = pad_w // 2
-    pad_right = pad_w - pad_left
-
-    # Apply padding
-    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
-
-    return padded_images
 
 def validate(args):
     # might as well try to validate something
@@ -227,7 +216,7 @@ def validate(args):
     elif args.input_size is not None:
         in_chans = args.input_size[0]
 
-    #args.model_kwargs['channel_size'] = args.input_size[-1]
+    args.model_kwargs['channel_size'] = args.input_size[-1]
 
     model = create_model(
         args.model,
@@ -334,6 +323,18 @@ def validate(args):
     
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
 
+    transform = RandomResizePad(original_size=target_size, min_size=160)
+    wrapped_dataloader = DataLoaderTransformWrapper(loader, transform)
+
+    visualize = False
+    if visualize == True:
+        visualize_dataloader_samples(
+            loader=wrapped_dataloader,
+            target_size=target_size,
+            num_images=16,
+            save_path='dataloader_samples.png'
+        )
+        exit(0)
     
     # import numpy as np
     # import matplotlib.pyplot as plt

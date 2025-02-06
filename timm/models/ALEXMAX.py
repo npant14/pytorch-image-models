@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 import scipy as sp
 import time
+import pdb
 
 from ._builder import build_model_with_cfg
 from ._manipulate import checkpoint_seq
@@ -34,6 +35,22 @@ class S1_old(nn.Module):
     def forward(self, x_pyramid):
         # get dimensions
         return [self.layer1(x) for x in x_pyramid]
+
+class S1(nn.Module):
+    def __init__(self,kernel_size=11, stride=4, padding=0):
+        super(S1, self).__init__()
+
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(3, 96, kernel_size=kernel_size, stride=stride, padding=padding),
+            nn.BatchNorm2d(96),
+            nn.ReLU())
+
+    def forward(self, x_pyramid):
+        # get dimensions
+        if type(x_pyramid) == list:
+            return [self.layer1(x) for x in x_pyramid]
+        else:
+            return self.layer1(x_pyramid)
 
 class S1(nn.Module):
     def __init__(self,kernel_size=11, stride=4, padding=0):
@@ -527,6 +544,93 @@ class ALEXMAX_v1(nn.Module):
             image_pyramid = []
             for i_s in image_scales:
                 i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear')
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+        else:
+            return [x]
+
+    def forward(self, x,pyramid=False):
+
+
+        #resize image
+        import pdb; pdb.set_trace()
+        if pyramid or self.pyramid:
+            out = self.make_ip(x)
+        else:
+            out = [x]
+
+        ## should make SxBxCxHxW
+        out = self.s1(out)
+
+
+        out_c1 = self.c1(out)
+        #bypass layers
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        #if pyramid:
+        #    return out_c1[0],out_c2[0]
+
+        out = self.s3(out_c2)
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        #if pyramid:
+        #    return out_c1[0],out_c2[0]
+
+        out = self.s3(out_c2)
+        out = self.global_pool(out)
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        if self.contrastive_loss:
+            return out, out_c1[0],out_c2[0]
+
+        return out
+
+class ALEXMAX_v1(nn.Module):
+    # kernel size for c1 is 2, stride is 3 with padding of 1. To get features on the 27x27 shape. Similar to alexnet
+    def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        super(ALEXMAX_v1, self).__init__()
+        self.s1 = S1()
+        self.c1= C_mid(nn.MaxPool2d(kernel_size = 2, stride = 3,padding=1), nn.MaxPool2d(kernel_size = 3, stride = 2))
+        #self.s2b = S2b()
+        #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s2 = S2()
+        self.c2 = C_mid(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s3 = S3()
+        self.global_pool =  C_mid(global_scale_pool=True)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU())
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU())
+        self.fc2= nn.Sequential(
+            nn.Linear(4096, num_classes))
+    def make_ip(self, x):
+        ## num_scale_bands = num images in IP - 1
+        num_scale_bands = self.ip_scale_bands
+        base_image_size = int(x.shape[-1])
+        scale = 4   ## factor in exponenet
+
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale)
+
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
                 interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear').clamp(min=0, max=1)
 
                 image_pyramid.append(interpolated_img)
@@ -947,6 +1051,7 @@ class ALEXMAX_v2_Cmid(nn.Module):
     def __init__(self, num_classes=1000,big_size =322,small_size =227, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
         self.num_classes = num_classes
         self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
         self.contrastive_loss = contrastive_loss
         #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
         self.ip_scale_bands = ip_scale_bands
@@ -1448,6 +1553,7 @@ def alexmax_v2_Cmid(pretrained=False, **kwargs):
 
 @register_model
 def alexmax(pretrained=False, **kwargs):
+    #deleting some kwargs that are messing up training
     #deleting some kwargs that are messing up training
     try:
         del kwargs["pretrained_cfg"]

@@ -9,7 +9,7 @@ from .registry import register_model
 __all__ = ["AlexNet", "alexnet"]
 
 class AlexNet(nn.Module):
-    def __init__(self, num_classes=1000, in_chans=3):
+    def __init__(self, num_classes=1000, in_chans=3, **kwargs):
         self.num_classes = num_classes
         self.in_chans = in_chans
         super(AlexNet, self).__init__()
@@ -36,9 +36,26 @@ class AlexNet(nn.Module):
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size = 3, stride = 2))
+        # 2304 for 160 x 160
+        # 4096 for 192 x 192
+        # 9216 for 227 x 227
+        # 12544 for 270 x 270
+        # 16384 for 321 x 321
+        # 25600 for 382 x 382
+        # 43264 for 454 x 454
+
+        # create a dict
+        in_size_dict = {160: 2304,
+                        192: 4096,
+                        227: 9216,
+                        270: 12544,
+                        321: 16384,
+                        382: 25600,
+                        454: 43264}
+
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(9216, 4096),
+            nn.Linear(in_size_dict[kwargs['channel_size']], 4096),
             nn.ReLU())
         self.fc1 = nn.Sequential(
             nn.Dropout(0.5),
@@ -64,7 +81,8 @@ import torch.utils.model_zoo as model_zoo
 
 @register_model
 def alexnet(pretrained=False, **kwargs):
-    model = AlexNet()
+    model = AlexNet(**kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url("/oscar/home/npant1/data/npant1/alexnet-owt-7be5be79.pth"))
+        pass
+        # model.load_state_dict(model_zoo.load_url("/oscar/home/npant1/data/npant1/alexnet-owt-7be5be79.pth"))
     return model

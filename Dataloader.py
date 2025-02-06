@@ -88,27 +88,10 @@ class ScaledImagenetDataset(Dataset):
             'resized_center': resized_center,
             'class_name': class_name
         }
+        
         return sample
 
 
-# Define transformations
-transform_pipeline = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor(),
-    transforms.CenterCrop(224)
-])
-
-# Define dataset and DataLoader
-csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/imagenet_centers.csv"
-root_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
-
-dataset = ScaledImagenetDataset(
-    csv_file=csv_file,
-    root_dir=root_dir,
-    transform=transform_pipeline
-)
-
-dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
 
 
 # Helper function to visualize a batch of images, masks, and centers
@@ -174,3 +157,37 @@ for i_batch, sample_batched in enumerate(dataloader):
         break
         
 """
+
+# Define transformations
+transform_pipeline = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+    transforms.CenterCrop(224)
+])
+
+# Define dataset and DataLoader
+csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/imagenet_centers.csv"
+root_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/"
+
+dataset = ScaledImagenetDataset(
+    csv_file=csv_file,
+    root_dir=root_dir,
+    transform=transform_pipeline
+)
+
+dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
+for i_batch, sample_batched in enumerate(dataloader):
+    print(f"\nBatch {i_batch}:")
+    import pdb;pdb.set_trace()
+    for i in range(len(sample_batched['class_name'])):
+        print(f"  Sample {i}:")
+        print(f"    Class Name: {sample_batched['class_name'][i]}")
+        print(f"    Scale Band: {sample_batched['scale_band'][i]}")
+        print(f"    Resized Center: {sample_batched['resized_center'][i].tolist()}")
+
+    if i_batch == 0:  # Visualize the first batch
+        output_dir = "output_figures"
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
+        show_batch(sample_batched, save_path=save_path)
+        break
