@@ -9,21 +9,32 @@ import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
 
+import os
+import pandas as pd
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from PIL import Image
+import torchvision.transforms as transforms
+
 class ScaledImagenetDataset(Dataset):
-   
     def __init__(self, csv_file, root_dir, transform=None, crop_size=224):
         """
         Args:
             csv_file (str): Path to CSV file containing metadata.
             root_dir (str): Root directory containing all images.
             transform (callable, optional): Transformations applied to samples.
-            crop_size (int): The final crop size used in transformation (default 224).
+            crop_size (int): The final crop size used in the transformation (default 224).
+                             The image is first resized to a proportional size.
+                             (Default ratio: 256/224)
         """
         self.data = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.transform = transform
-        self.crop_size = crop_size  # Store crop size for resized center calculation
-
+        self.crop_size = crop_size
+        # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
+        self.resize_size = int(round(crop_size * (256 / 224)))
+        
     def __len__(self):
         return len(self.data)
 
@@ -57,26 +68,31 @@ class ScaledImagenetDataset(Dataset):
         mask_data = np.load(mask_path)
         mask = mask_data[mask_data.files[0]]
 
-        # Convert relative centers to actual pixel coordinates based on resized image
-        resized_h, resized_w = 256, 256  # Assuming Resize(256,256) applied before crop
-        crop_h, crop_w = self.crop_size, self.crop_size  # CenterCrop applied to 224x224
+        # Instead of assuming a fixed resize of 256x256, compute it from the crop_size.
+        # Here, we assume that the transformation pipeline first resizes the image to (resize_size, resize_size)
+        # and then applies a CenterCrop of (crop_size, crop_size).
+        resized_h, resized_w = self.resize_size, self.resize_size  # e.g., 256 when crop_size is 224
+        crop_h, crop_w = self.crop_size, self.crop_size           # e.g., 224
 
+        # Convert relative centers to actual pixel coordinates based on the resized image.
         center_x = int(relative_center_x * resized_w)
         center_y = int(relative_center_y * resized_h)
 
-        # Offset due to CenterCrop
+        # Calculate the offset introduced by the CenterCrop.
         offset_x = (resized_w - crop_w) // 2
         offset_y = (resized_h - crop_h) // 2
 
-        # Calculate new resized center for cropped image
+        # Calculate new center coordinates for the cropped image.
         resized_center_x = center_x - offset_x
         resized_center_y = center_y - offset_y
 
         resized_center = torch.tensor([resized_center_x, resized_center_y], dtype=torch.float32)
 
+        # Apply transformations if provided.
         if self.transform:
             image = self.transform(image)
             mask = Image.fromarray(mask).convert("L")
+            # Resize mask to match the image dimensions (assumed to be (crop_size, crop_size)).
             mask = transforms.Resize((image.shape[1], image.shape[2]))(mask)
             mask = torch.tensor(np.array(mask), dtype=torch.float32)
             mask = torch.stack([mask] * 3, dim=0)
@@ -86,10 +102,14 @@ class ScaledImagenetDataset(Dataset):
             'mask': mask,
             'scale_band': scale_band,
             'resized_center': resized_center,
-            'class_name': class_name
+            'class_name': class_name,
+            'wordnet_id': wordnet_id,
+            'image_id': image_id
+            
         }
         
         return sample
+
 
 
 

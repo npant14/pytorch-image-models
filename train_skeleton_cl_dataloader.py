@@ -43,7 +43,7 @@ import yaml
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
 
 from timm import utils
-from timm.data import create_dataset, create_loader, resolve_data_config, AugMixDataset
+from timm.data import create_dataset, create_loader, resolve_data_config, AugMixDataset, create_loader_scale
 from timm.layers import convert_sync_batchnorm, set_fast_norm
 from timm.models import create_model, safe_model_name, resume_checkpoint, model_parameters
 from timm.optim import create_optimizer_v2, optimizer_kwargs
@@ -291,7 +291,7 @@ def pad_to_size(a, size):
     return a
 
 # --- Helper function for student rescaling ---
-def random_rescale(x, student_scale_bands):
+def random_rescale(x, student_scale_bands=10,pick_scale = None):
     """
     Randomly rescales the input tensor x (shape: [B, C, H, W]) using a range of scale factors
     computed from student_scale_bands. If the rescaled image is smaller than the original size,
@@ -313,23 +313,42 @@ def random_rescale(x, student_scale_bands):
     scale_factor_list = [2 ** (i / 4) for i in scale_factor_list]
     
     # Randomly select a scale factor.
-    scale_factor = random.choice(scale_factor_list)
-    
     # Get original spatial dimensions.
     img_hw = x.shape[-1]  # Assuming square images.
-    new_hw = int(img_hw * scale_factor)
-    
-    # Rescale the image using bilinear interpolation.
-    x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
-    
-    
-    # If the new size is smaller, pad to the original size.
-    if new_hw <= img_hw:
-        x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
-    # If the new size is larger, center-crop to the original size.
+    center_crop = torchvision.transforms.CenterCrop(img_hw)
+   
+    if pick_scale is not None:
+        scale_factors = [- p for p in pick_scale]
+        new_hws = [int(img_hw * scale_factor_list[scale_factor]) for scale_factor in scale_factors]
+        
+        for i in range(len(x)):
+            
+            if new_hws[i] <= img_hw:
+                temp = F.interpolate(x[i].unsqueeze(0), size=(new_hws[i], new_hws[i]), mode='bilinear', align_corners=False)
+                x[i] = pad_to_size(temp, (img_hw, img_hw))
+            else:
+                x[i] = center_crop(x[i])
+           
+        return x
+       
     else:
-        center_crop = torchvision.transforms.CenterCrop(img_hw)
-        x_rescaled = center_crop(x_rescaled)
+        scale_factor = random.choice(scale_factor_list)
+    
+        # Get original spatial dimensions.
+        img_hw = x.shape[-1]  # Assuming square images.
+        new_hw = int(img_hw * scale_factor)
+        
+        # Rescale the image using bilinear interpolation.
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+       
+        
+        # If the new size is smaller, pad to the original size.
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        # If the new size is larger, center-crop to the original size.
+        else:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
     
     return x_rescaled
     
@@ -360,17 +379,18 @@ def train_one_epoch(
     batch_time_m = utils.AverageMeter()
 
     end = time.time()
-    for batch_idx, (input, target) in enumerate(loader):
+    for batch_idx, (input, target,scale_band) in enumerate(loader):
+        
         # Move input and target to device.
         input = input.to(device)
         target = target.to(device)
-        
+        scale_band = scale_band.to(device)
         # Teacher receives the original image.
         teacher_output = teacher_model(input)
         # Student receives a randomly rescaled version.
-        student_input = random_rescale(input, args.student_scale_bands)
-        student_input = student_input.to(device)
-        student_output = student_model(student_input)
+        input = random_rescale(input, pick_scale=scale_band)
+        #student_input = student_input.to(device)
+        student_output = student_model(input)
         
         # Compute individual losses.
         teacher_loss = loss_fn(teacher_output, target)
@@ -562,7 +582,6 @@ def main():
         student_model.set_grad_checkpointing(enable=True)
 
     data_config = resolve_data_config(vars(args), model=teacher_model, verbose=utils.is_primary(args))
-
     if args.data and not args.data_dir:
         args.data_dir = args.data
     input_img_mode = args.input_img_mode if args.input_img_mode is not None else ('RGB' if data_config['input_size'][0] == 3 else 'L')
@@ -582,8 +601,10 @@ def main():
         target_key=args.target_key,
         num_samples=args.train_num_samples,
     )
-    loader_train = create_loader(
-        dataset_train,
+    loader_train = create_loader_scale(
+        csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/imagenet_centers.csv",
+        root_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/", 
+        root = args.data_dir, 
         input_size=data_config['input_size'],
         batch_size=args.batch_size,
         is_training=True,
