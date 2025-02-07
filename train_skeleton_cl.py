@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-""" ImageNet Teacher-Student Training Script
+""" ImageNet Teacher-Student Training Script with Distillation Temperature
 
 This script demonstrates training two networks – a teacher and a student – built from the same
 architecture but configurable via separate keyword arguments. The teacher network receives the
 original sample while the student network receives a rescaled version of the sample. A KL divergence
-loss is computed between their outputs.
-  
+loss is computed between their outputs with temperature scaling and teacher output detachment to 
+prevent the teacher from being influenced by the distillation loss.
+
 Extra command-line arguments:
   --teacher-kwargs: extra kwargs for the teacher model.
   --student-kwargs: extra kwargs for the student model.
   --student-scale-bands: an integer controlling the scale bands (see code for details).
   --kl-lambda: weight for the KL divergence loss between teacher and student.
-  
+  --distill-temp: temperature for distillation (default: 2.0).
+
 For the student rescaling, a simple function randomly selects a scale factor from a set computed as:
   
     scale_factor_list = np.arange(-student_scale_bands//2 + 1, student_scale_bands//2 + 2)
@@ -21,6 +23,7 @@ and then uses bilinear interpolation.
   
 Hacked together by / Copyright 2020 Ross Wightman, modified by ChatGPT.
 """
+
 import argparse
 import importlib
 import json
@@ -81,6 +84,7 @@ has_compile = hasattr(torch, 'compile')
 
 _logger = logging.getLogger('train')
 print('parsing new function ')
+
 # First arg parser: for the config file.
 config_parser = argparse.ArgumentParser(description='Training Config', add_help=False)
 config_parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
@@ -168,13 +172,14 @@ group.add_argument('--teacher-kwargs', nargs='*', default={}, action=utils.Parse
                    help='Extra kwargs for teacher model.')
 group.add_argument('--student-kwargs', nargs='*', default={}, action=utils.ParseKwargs,
                    help='Extra kwargs for student model.')
-# New arguments for student scaling and KL divergence.
+# New arguments for student scaling, KL divergence, and distillation temperature.
 group.add_argument('--student-scale-bands', type=int, default=4,
                    help='Integer that controls the range of scaling factors for the student input.')
 group.add_argument('--teacher-scale-bands', type=int, default=1)
-
 group.add_argument('--kl-lambda', type=float, default=1.0,
                    help='Weight for the KL divergence loss between student and teacher outputs.')
+group.add_argument('--distill-temp', type=float, default=2.0,
+                   help='Temperature for distillation (softening the teacher outputs).')
 
 # Device & distributed
 group = parser.add_argument_group('Device parameters')
@@ -375,8 +380,13 @@ def train_one_epoch(
         # Compute individual losses.
         teacher_loss = loss_fn(teacher_output, target)
         student_loss = loss_fn(student_output, target)
-        kl_loss = kl_loss_fn(F.log_softmax(student_output, dim=1),
-                             F.softmax(teacher_output, dim=1))
+        
+        # --- Compute KL Divergence Loss with Temperature Scaling ---
+        T = args.distill_temp  # temperature for distillation
+        student_log_probs = F.log_softmax(student_output / T, dim=1)
+        teacher_probs = F.softmax(teacher_output.detach() / T, dim=1)
+        kl_loss = kl_loss_fn(student_log_probs, teacher_probs) * (T * T)
+        
         total_loss = teacher_loss + student_loss + args.kl_lambda * kl_loss
 
         # Backpropagation.
