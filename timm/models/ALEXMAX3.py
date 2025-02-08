@@ -226,6 +226,7 @@ class ALEXMAX_v3_1(nn.Module):
       
         self.c1= C_scoring2(96,nn.MaxPool2d(kernel_size = 3, stride = 2), 
                                nn.MaxPool2d(kernel_size = 4, stride = 3), 
+                               skip=2,
                                global_scale_pool=False)
         #self.s2b = S2b()
         #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
@@ -237,7 +238,7 @@ class ALEXMAX_v3_1(nn.Module):
                                 skip =2 ,
                                 global_scale_pool=False)
         self.s3 = S3()
-        self.global_pool =  C_scoring2(256,global_scale_pool=True)
+        self.global_pool =  C(global_scale_pool=True)
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(classifier_input_size, 4096),

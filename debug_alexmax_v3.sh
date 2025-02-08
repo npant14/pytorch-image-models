@@ -16,7 +16,7 @@ module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-scale_bands=11
+scale_bands=7
 
 sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
@@ -37,7 +37,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment debug2_resize2_alexmax_v3.1_cl_1_ip_{$scale_bands}_322_12544 \
+    --experiment debug3_resize2_alexmax_v3.1_cl_1_ip_{$scale_bands}_322_12544 \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/1_25/\
     
  
