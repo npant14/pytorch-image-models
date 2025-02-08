@@ -4,10 +4,10 @@
 #SBATCH -n 8
 #SBATCH -N 1
 #SBATCH --mem=60GB
-#SBATCH -o resmax_bypass_add.out
-#SBATCH -e resmax_bypass_add.err
+#SBATCH -o incepmax_bypass_add_c_score2_ip1.out
+#SBATCH -e incepmax_bypass_add_c_score2_ip1.err
 #SBATCH --account=carney-tserre-condo
-#SBATCH -J resmax_bypass_add
+#SBATCH -J incepmax_bypass_add_c_score2_ip1
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -23,7 +23,7 @@ sleep 10
 
 # Parameters
 DATASET="torch/imagenet"
-MODEL="resmax_bypass"
+MODEL="incepmax_bypass_c_score2"
 BIG_SIZE=322
 SMALL_SIZE=227
 PYRAMID="True"
@@ -31,14 +31,15 @@ CLASSIFIER_INPUT_SIZE=9216
 CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
 GPUS=8
-# CONV="double3x3"
-EXPERIMENT_NAME="debug_${MODEL}_add_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]"
+CONV="double3x3"
+EXPERIMENT_NAME="debug_${MODEL}_add_ip1_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]"
+# EXPERIMENT_NAME="test"
 
 sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset $DATASET \
     --model $MODEL \
-    --model-kwargs big_size=$BIG_SIZE small_size=$SMALL_SIZE pyramid=$PYRAMID classifier_input_size=$CLASSIFIER_INPUT_SIZE\
+    --model-kwargs big_size=$BIG_SIZE small_size=$SMALL_SIZE pyramid=$PYRAMID classifier_input_size=$CLASSIFIER_INPUT_SIZE conv_type=$CONV\
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b 128 \

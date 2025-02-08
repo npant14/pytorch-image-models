@@ -149,6 +149,7 @@ class ALEXMAX_v3(nn.Module):
             nn.ReLU())
         self.fc2= nn.Sequential(
             nn.Linear(4096, num_classes))
+        
     def make_ip(self, x):
         ## num_scale_bands = num images in IP - 1
         num_scale_bands = self.ip_scale_bands
