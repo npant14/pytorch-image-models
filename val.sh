@@ -46,7 +46,7 @@ do
                 --input-size $INPUT_SIZE \
                 --pretrained \
                 --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/c_score/debug_resmax_bypass_concat_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_]/last.pth.tar \
-                --results-file /oscar/data/tserre/xyu110/pytorch-output/train/debug_resmax_bypass_concat_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_].txt
+                --results-file /oscar/data/tserre/xyu110/pytorch-output/train/${imgscale}_debug_resmax_bypass_concat_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_].txt
             wait
         fi
     done

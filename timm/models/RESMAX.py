@@ -634,7 +634,7 @@ class RESMAX_V1(nn.Module):
         out = self.fc2(out)
 
         return out
-    
+
 
 @register_model
 def resmax(pretrained=False, **kwargs):
@@ -647,7 +647,7 @@ def resmax(pretrained=False, **kwargs):
         pass
     model = RESMAX(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 
@@ -662,7 +662,7 @@ def resmax_c(pretrained=False, **kwargs):
         pass
     model = RESMAX_C(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 @register_model
@@ -676,7 +676,7 @@ def resmax_c_score2(pretrained=False, **kwargs):
         pass
     model = RESMAX_C_Score2(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 
@@ -691,7 +691,7 @@ def resmax_bypass(pretrained=False, **kwargs):
         pass
     model = RESMAX_Bypass(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 @register_model
@@ -705,7 +705,7 @@ def resmax_v1(pretrained=False, **kwargs):
         pass
     model = RESMAX_V1(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 
