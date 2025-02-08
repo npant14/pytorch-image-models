@@ -957,6 +957,99 @@ class VGGMAX(nn.Module):
             return out, out_c1[0],out_c2[0]
 
         return out
+
+from .ALEXMAX3 import C_scoring2
+
+class VGGMAX_V1(nn.Module):
+    def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
+                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False, **kwargs):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        self.big_size = big_size
+        self.small_size = small_size
+        super(VGGMAX_V1, self).__init__()
+
+        self.s1 = S1_VGG_Big()
+        
+        self.c1 = C_scoring2(96,
+            nn.MaxPool2d(kernel_size=6, stride=3, padding=3),
+            nn.MaxPool2d(kernel_size=3, stride=2)
+        )
+        
+        self.s2 = S2_VGG()
+        self.c2 = C(
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            global_scale_pool=False
+        )
+        
+        self.s3 = S3()
+        self.global_pool = C(global_scale_pool=True)
+        
+        # Keep classifier layers the same
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU()
+        )
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU()
+        )
+        self.fc2 = nn.Sequential(
+            nn.Linear(4096, num_classes)
+        )
+
+    def make_ip(self, x):
+        ## num_scale_bands = num images in IP - 1
+        num_scale_bands = self.ip_scale_bands
+        base_image_size = int(x.shape[-1])
+        scale = 4   ## factor in exponenet
+
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale)
+        
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear')
+
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+        else: 
+            return [x]
+
+    def forward(self, x,pyramid=False):
+        #resize image
+        # always making pyramid to start with only two scales. 
+        out = self.make_ip(x)
+        
+        ## should make SxBxCxHxW
+        out_1 = self.s1(out)
+        out_c1 = self.c1(out_1)
+
+        #bypass layers
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        if pyramid:
+            return out_c1[0],out_c2[0]
+
+        out = self.s3(out_c2)
+        out = self.global_pool(out)
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        if self.contrastive_loss:
+            return out, out_c1[0],out_c2[0]
+
+        return out
     
 
 class NINBlock(nn.Module):
@@ -1817,6 +1910,20 @@ def vggmax(pretrained=False, **kwargs):
         raise NotImplementedError
     return model
 
+
+@register_model
+def vggmax_v1(pretrained=False, **kwargs):
+    #deleting some kwargs that are messing up training
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    model = VGGMAX_V1(**kwargs)
+    if pretrained:
+        raise NotImplementedError
+    return model
 
 @register_model
 def ninmax(pretrained=False, **kwargs):

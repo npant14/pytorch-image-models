@@ -512,9 +512,12 @@ class RESMAX_Bypass(nn.Module):
         return out
     
 
-class RESMAX_Bypass_C_Score2(nn.Module):
+class RESMAX_V1(nn.Module):
     def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
-                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False, **kwargs):
+                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False,
+                 bypass=False,
+                 c_scoring='v2',
+                 **kwargs):
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
@@ -522,31 +525,42 @@ class RESMAX_Bypass_C_Score2(nn.Module):
         self.pyramid = pyramid
         self.big_size = big_size
         self.small_size = small_size
-        super(RESMAX_Bypass_C_Score2, self).__init__()
+        self.bypass = bypass
+        self.c_scoring = c_scoring
+        super(RESMAX_V1, self).__init__()
 
         self.s1 = S1_Res()
-        
-        self.c1= C_scoring2(
-            96,
-            nn.MaxPool2d(kernel_size = 3, stride = 2), 
-            nn.MaxPool2d(kernel_size = 4, stride = 3), 
-            global_scale_pool=False
-        )
+
+        print(self.c_scoring)
+        if self.c_scoring == 'v2':
+            self.c1= C_scoring2(
+                96,
+                nn.MaxPool2d(kernel_size = 3, stride = 2), 
+                nn.MaxPool2d(kernel_size = 4, stride = 3), 
+                global_scale_pool=False
+            )
+        elif self.c_scoring == 'v1':
+            self.c1 = C_scoring(96,
+                nn.MaxPool2d(kernel_size=6, stride=3, padding=3),
+                nn.MaxPool2d(kernel_size=3, stride=2)
+            )
         
         self.s2 = S2_Res()
-        self.s2b = S2b_Res()
         self.c2 = C(
             nn.MaxPool2d(kernel_size=3, stride=2),
             nn.MaxPool2d(kernel_size=3, stride=2),
             global_scale_pool=False
         )
-        self.c2b_seq = nn.Sequential(
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.Conv2d(1024, 256, kernel_size=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True)
-        )
+
+        if self.bypass == True:
+            self.s2b = S2b_Res()
+            self.c2b_seq = nn.Sequential(
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.Conv2d(1024, 256, kernel_size=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True)
+            )
 
         self.s3 = S3_Res()
         self.global_pool = C(global_scale_pool=True)
@@ -568,7 +582,7 @@ class RESMAX_Bypass_C_Score2(nn.Module):
 
     def make_ip(self, x):
         ## num_scale_bands = num images in IP - 1
-        num_scale_bands = self.ip_scale_bands # 1
+        num_scale_bands = self.ip_scale_bands
         base_image_size = int(x.shape[-1])
         scale = 4   ## factor in exponenet
 
@@ -585,41 +599,39 @@ class RESMAX_Bypass_C_Score2(nn.Module):
         else: 
             return [x]
 
-
     def forward(self, x, pyramid=False):
         # resize image
         # always making pyramid to start with only two scales. 
         out = self.make_ip(x)
         
         ## should make SxBxCxHxW
-        out_1 = self.s1(out)
-        out_c1 = self.c1(out_1)
+        out = self.s1(out)
+        out_c1 = self.c1(out)
         
         # s2
         out = self.s2(out_c1)
-        out_c2 = self.c2(out)
+        out = self.c2(out)
         
+        if self.bypass:
         # s2b # input torch.Size([128, 96, 28, 28])
-        bypass = self.s2b(out_c1) # torch.Size([128, 1024, 28, 28])
-        bypass = self.c2b_seq(bypass[0]) # torch.Size([128, 256, 6, 6])
-        bypass = bypass.reshape(bypass.size(0), -1)
+            bypass = self.s2b(out_c1) # torch.Size([128, 1024, 28, 28])
+            bypass = self.c2b_seq(bypass[0]) # torch.Size([128, 256, 6, 6])
+            bypass = bypass.reshape(bypass.size(0), -1)
 
         # s3
-        out = self.s3(out_c2)
+        out = self.s3(out)
         out = self.global_pool(out) # out shape: torch.Size([128, 256, 6, 6])
         out = out.reshape(out.size(0), -1)
 
         # merge bypass and main path
-        out = torch.cat([out, bypass], dim=1)
+        if self.bypass:
+            out = torch.cat([out, bypass], dim=1)
         # out += bypass
 
         # fc layers
         out = self.fc(out)
         out = self.fc1(out)
         out = self.fc2(out)
-
-        if self.contrastive_loss:
-            return out, out_c1[0],out_c2[0]
 
         return out
     
@@ -683,7 +695,7 @@ def resmax_bypass(pretrained=False, **kwargs):
     return model
 
 @register_model
-def resmax_bypass_c_score2(pretrained=False, **kwargs):
+def resmax_v1(pretrained=False, **kwargs):
     #deleting some kwargs that are messing up training
     try:
         del kwargs["pretrained_cfg"]
@@ -691,7 +703,7 @@ def resmax_bypass_c_score2(pretrained=False, **kwargs):
         del kwargs["drop_rate"]
     except:
         pass
-    model = RESMAX_Bypass_C_Score2(**kwargs)
+    model = RESMAX_V1(**kwargs)
     if pretrained:
         raise NotImplementedError
     return model

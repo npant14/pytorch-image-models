@@ -186,6 +186,7 @@ class ALEXMAX_v3(nn.Module):
 
         out = self.s3(out_c2)
         out = self.global_pool(out)
+        
         out = out.reshape(out.size(0), -1)
         out = self.fc(out)
         out = self.fc1(out)
