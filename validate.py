@@ -305,8 +305,8 @@ def validate(args):
     crop_pct = 1.0 if test_time_pool else data_config['crop_pct']
     loader = create_loader(
         dataset,
-        # input_size=data_config['input_size'],
-        input_size=args.image_scale, ##############make image smaller
+        input_size=data_config['input_size'],
+        # input_size=args.image_scale, ##############make image smaller
         batch_size=args.batch_size,
         use_prefetcher=args.prefetcher,
         interpolation=data_config['interpolation'],
@@ -322,14 +322,16 @@ def validate(args):
     )
     
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
+    print("image size:", args.image_scale)
 
-    transform = RandomResizePad(original_size=target_size, min_size=160)
-    wrapped_dataloader = DataLoaderTransformWrapper(loader, transform)
+    #####PADDING FOR VALIDATION################
+    transform = RandomResizePad(original_size=target_size, min_size=args.image_scale[1], max_size=args.image_scale[1])
+    loader = DataLoaderTransformWrapper(loader, transform)
 
     visualize = False
     if visualize == True:
         visualize_dataloader_samples(
-            loader=wrapped_dataloader,
+            loader=loader,
             target_size=target_size,
             num_images=16,
             save_path='dataloader_samples.png'
@@ -367,8 +369,6 @@ def validate(args):
 
         end = time.time()
         for batch_idx, (input, target) in enumerate(loader):
-            #####PADDING FOR VALIDATION################
-            input = pad_batch(input, target_size) # padding!!!
 
             if args.no_prefetcher:
                 target = target.to(device)

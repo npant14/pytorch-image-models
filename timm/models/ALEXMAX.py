@@ -1922,7 +1922,7 @@ def vggmax_v1(pretrained=False, **kwargs):
         pass
     model = VGGMAX_V1(**kwargs)
     if pretrained:
-        raise NotImplementedError
+        pass
     return model
 
 @register_model

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=72:00:00
+#SBATCH --time=48:00:00
 #SBATCH -p gpu --gres=gpu:8
 #SBATCH -n 8
 #SBATCH -N 1
@@ -30,6 +30,7 @@ CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
 GPUS=8
 IP_BANDS=1
+BATCH_SIZE=128
 EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]"
 # EXPERIMENT_NAME="test"
 
@@ -40,7 +41,7 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=True \
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
-    -b 128 \
+    -b $BATCH_SIZE \
     --epochs 90 \
     --lr 1e-2 \
     --weight-decay 5e-4 \
