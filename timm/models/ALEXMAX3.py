@@ -437,9 +437,9 @@ class ALEXMAX_v3_3(nn.Module):
             nn.ReLU())
         self.fc2= nn.Sequential(
             nn.Linear(4096, num_classes))
-    def make_ip(self, x):
+    def make_ip(self, x,num_scale_bands):
         ## num_scale_bands = num images in IP - 1
-        num_scale_bands = self.ip_scale_bands
+        
         base_image_size = int(x.shape[-1])
         scale = 4   ## factor in exponenet
 
@@ -455,15 +455,16 @@ class ALEXMAX_v3_3(nn.Module):
             return image_pyramid
         else: 
             return [x]
-    def forward(self, x,pyramid=False):
+    def forward(self, x,pyramid=False,main_route=False):
         #resize image
         # always making pyramid to start with only two scales. 
-        out = self.make_ip(x)
-        
+        if main_route:
+            out = self.make_ip(x,2)
+        else:
+            out = self.make_ip(x,self.ip_scale_bands)
         ## should make SxBxCxHxW
-        out_1 = self.s1(out)
-        out_c1 = self.c1(out_1)
-        #bypass layers
+        out= self.s1(out)
+        out_c1 = self.c1(out)
         out = self.s2(out_c1)
         out_c2 = self.c2(out)
 
@@ -486,6 +487,114 @@ class ALEXMAX_v3_3(nn.Module):
 
         return out
     
+   
+class ALEXMAX_v3_4(nn.Module):
+    """
+    ALEXMAX_v3 model. This model is an implementation of the HMAX model.
+    It is based on the ALEXNET architecture.
+    Implement only one S1 layer. The C1 layer is replaced with a learnable scoring function.
+    Also it has resizing layers and a learnable scoring function.
+    
+    2
+    """
+    
+    def __init__(self, num_classes=1000,base_size =322, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False, **kwargs):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        self.base_size = base_size
+        super(ALEXMAX_v3_4, self).__init__()
+
+        self.s1= S1(kernel_size=11, stride=4, padding=0)
+      
+        self.c1= C_scoring2(96,nn.MaxPool2d(kernel_size = 3, stride = 2), 
+                               nn.MaxPool2d(kernel_size = 4, stride = 3), 
+                               skip=1,
+                               global_scale_pool=False)
+        #self.s2b = S2b()
+        #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
+        self.s2 = S2(kernel_size=3, stride=1, padding=2)
+        self.c2 = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2,padding=1), 
+                                nn.MaxPool2d(kernel_size = 6, stride = 2),
+                                resize_kernel_1 =3, 
+                                resize_kernel_2 =1,
+                                skip =2 ,
+                                global_scale_pool=False)
+        self.s3 = S3()
+        
+        self.global_pool_ip = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2),nn.MaxPool2d(kernel_size = 6, stride = 3,padding=1),resize_kernel_1 =3, resize_kernel_2 =1,skip =2 ,global_scale_pool=False)
+        
+        self.global_pool_main =  C(global_scale_pool=True)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU())
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU())
+        self.fc2= nn.Sequential(
+            nn.Linear(4096, num_classes))
+    def make_ip(self, x,num_scale_bands):
+        ## num_scale_bands = num images in IP - 1
+        
+        base_image_size = int(x.shape[-1])
+        scale = 4   ## factor in exponenet
+
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale)
+        
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear')
+
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+        else: 
+            return [x]
+    def forward(self, x,pyramid=False,main_route=False):
+        #resize image
+        # always making pyramid to start with only two scales. 
+        if main_route:
+            out = self.make_ip(x,2)
+        else:
+            out = self.make_ip(x,self.ip_scale_bands)
+        
+        ## should make SxBxCxHxW
+        out= self.s1(out)
+        out_c1 = self.c1(out)
+        out = self.s2(out_c1)
+        out_c2 = self.c2(out)
+
+        if pyramid:
+            return out_c1[0],out_c2[0]
+        
+        out = self.s3(out_c2)
+        
+        if len(out) > 2:
+            out = self.global_pool_ip(out)
+        else:   
+            out = self.global_pool_main(out)
+            
+       
+        if type(out) == list:  
+            out = out[0]
+        
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        if self.contrastive_loss:
+            return out, out_c1[0],out_c2[0]
+
+        return out
+    
+     
     
 class CHALEXMAX3(nn.Module):
     def __init__(self, num_classes=1000,
@@ -545,6 +654,199 @@ class CHALEXMAX3(nn.Module):
         correct_scale_loss = F.mse_loss(stream_teacher_c1, stream_student_c1) + F.mse_loss(stream_teacher_c2, stream_student_c2)
         return out, correct_scale_loss
     
+class CHALEXMAX_V3_2(nn.Module):
+    def __init__(self, num_classes=1000,
+                 in_chans=3, 
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 hmax_type = "alexmax_v3_4",
+                 contrastive_loss=True,
+                **kwargs):
+        super(CHALEXMAX_V3_2, self).__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        
+        if hmax_type == "alexmax_v3_4":
+            self.model_backbone = ALEXMAX_v3_4(num_classes=num_classes,
+                                                        in_chans=in_chans,
+                                                        ip_scale_bands=self.ip_scale_bands,
+                                                        classifier_input_size=classifier_input_size,
+                                                        contrastive_loss=self.contrastive_loss)
+        else:
+            raise(NotImplementedError)
+
+        
+
+    def forward(self, x):
+
+        # stream 1
+        stream_1_output, stream_1_c1_feats ,stream_1_c2_feats = self.model_backbone(x,main_route=True)
+
+        # stream 2
+        scale_factor_list = [0.49,0.59,0.707, 0.841, 1, 1.189, 1.414]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw*scale_factor)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        elif new_hw > img_hw:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        
+        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
+
+        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
+        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1*out_correct_scale_loss
+        return stream_2_output, correct_scale_loss
+   
+class CHALEXMAX_V3_3(nn.Module):
+    def __init__(self, num_classes=1000,
+                 in_chans=3, 
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 hmax_type = "alexmax_v3_4",
+                 contrastive_loss=True,
+                **kwargs):
+        super(CHALEXMAX_V3_3, self).__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        
+        if hmax_type == "alexmax_v3_4":
+            self.model_backbone = ALEXMAX_v3_4(num_classes=num_classes,
+                                                        in_chans=in_chans,
+                                                        ip_scale_bands=self.ip_scale_bands,
+                                                        classifier_input_size=classifier_input_size,
+                                                        contrastive_loss=self.contrastive_loss)
+        else:
+            raise(NotImplementedError)
+
+        
+
+    def forward(self, x):
+
+        # stream 1
+        stream_1_output, stream_1_c1_feats ,stream_1_c2_feats = self.model_backbone(x)
+
+        # stream 2
+        scale_factor_list = [0.49,0.59,0.707, 0.841, 1, 1.189, 1.414]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw*scale_factor)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        elif new_hw > img_hw:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        
+        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
+
+        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
+        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1*out_correct_scale_loss
+        return stream_1_output, correct_scale_loss
+    
+
+class CHALEXMAX_V3(nn.Module):
+    def __init__(self, num_classes=1000,
+                 in_chans=3, 
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 hmax_type = "alexmax_v3_4",
+                 contrastive_loss=True,
+                **kwargs):
+        super(CHALEXMAX_V3, self).__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        #ip_scale_bands: the number of scale BANDS (one less than the number of images in the pyramid)
+        self.ip_scale_bands = ip_scale_bands
+        
+        if hmax_type == "alexmax_v3_4":
+            self.model_backbone = ALEXMAX_v3_4(num_classes=num_classes,
+                                                        in_chans=in_chans,
+                                                        ip_scale_bands=self.ip_scale_bands,
+                                                        classifier_input_size=classifier_input_size,
+                                                        contrastive_loss=self.contrastive_loss)
+        else:
+            raise(NotImplementedError)
+
+        
+
+    def forward(self, x):
+
+        # stream 1
+        stream_1_output, stream_1_c1_feats ,stream_1_c2_feats = self.model_backbone(x,main_route=True)
+
+        # stream 2
+        scale_factor_list = [0.49,0.59,0.707, 0.841, 1, 1.189, 1.414]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw*scale_factor)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        elif new_hw > img_hw:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        
+        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
+
+        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
+        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1*out_correct_scale_loss
+        return stream_1_output, correct_scale_loss
+    
+@register_model
+def chalexmax_v3_1(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    if pretrained:
+       raise ValueError("No pretrained model available for CHALEXMAX3")
+    model = CHALEXMAX_V3(**kwargs)
+    return model
+
+@register_model
+def chalexmax_v3_2(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    if pretrained:
+       raise ValueError("No pretrained model available for CHALEXMAX3")
+    model = CHALEXMAX_V3_2(**kwargs)
+    return model
+
+@register_model
+def chalexmax_v3_3(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    if pretrained:
+       raise ValueError("No pretrained model available for CHALEXMAX3")
+    model = CHALEXMAX_V3_3(**kwargs)
+    return model
+
 @register_model
 def alexmax_v3(pretrained=False, **kwargs):
     try:
@@ -596,15 +898,15 @@ def alexmax_v3_3(pretrained=False, **kwargs):
     model = ALEXMAX_v3_3(**kwargs)
     return model
 
-@register_model
-def chalexmax_v3(pretrained=False, **kwargs):
-    try:
-        del kwargs["pretrained_cfg"]
-        del kwargs["pretrained_cfg_overlay"]
-        del kwargs["drop_rate"]
-    except:
-        pass
-    if pretrained:
-       raise ValueError("No pretrained model available for CHALEXMAX3")
-    model = CHALEXMAX3(**kwargs)
-    return model
+# @register_model
+# def chalexmax_v3(pretrained=False, **kwargs):
+#     try:
+#         del kwargs["pretrained_cfg"]
+#         del kwargs["pretrained_cfg_overlay"]
+#         del kwargs["drop_rate"]
+#     except:
+#         pass
+#     if pretrained:
+#        raise ValueError("No pretrained model available for CHALEXMAX3")
+#     model = CHALEXMAX3(**kwargs)
+#     return model

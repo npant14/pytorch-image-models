@@ -232,6 +232,7 @@ def validate(args):
         args.num_classes = model.num_classes
 
     if args.checkpoint:
+        
         load_checkpoint(model, args.checkpoint, args.use_ema)
 
     if args.reparam:
