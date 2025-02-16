@@ -16,9 +16,9 @@ module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-scale_bands=3
+scale_bands=7
 classifier_input_size=9216
-model=alexmax_v3_2
+model=alexmax_v3_3
 
 sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
