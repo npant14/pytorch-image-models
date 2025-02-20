@@ -16,7 +16,7 @@ module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-scale_bands=7
+scale_bands=5
 classifier_input_size=9216
 model=chalexmax_v3_3
 cl_lambda=1
@@ -29,7 +29,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --cl-lambda $cl_lambda\
     --opt sgd \
     -b 128 \
-    --epochs 100 \
+    --epochs 120 \
     --lr 1e-2 \
     --weight-decay 5e-4 \
     --sched step \
@@ -40,7 +40,7 @@ sh distributed_train.sh 2 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment debug3_resize2_{$model}_cl_{$cl_lambda}_ip_{$scale_bands}_322_{$classifier_input_size}\
+    --experiment debug5_resize2_{$model}_cl_{$cl_lambda}_ip_{$scale_bands}_322_{$classifier_input_size}\
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/\
     
  

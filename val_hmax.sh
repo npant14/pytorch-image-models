@@ -17,7 +17,7 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 for imgscale in 160 192 227 271 322 
 do
-    for ip_band in 3 
+    for ip_band in 7
     do  
         # Set size based on ip_band
         if [ $ip_band -eq 1 ]; then
@@ -28,13 +28,13 @@ do
 
         sh distributed_val.sh 1 validate.py \
             --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-            --model alexmax_v3_2\
+            --model chalexmax_v3_3\
             --model-kwargs ip_scale_bands=${ip_band} classifier_input_size=${size} \
             -b 128 \
             --image-scale 3 $imgscale $imgscale \
             --input-size 3 322 322 \
-            --checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/debug3_resize2_{alexmax_v3_2}_cl_1_ip_{$ip_band}_322_{9216}/model_best.pth.tar \
-            --results-file /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/scale_${imgscale}_alexmax_v3_2_bypass_ip_${ip_band}.txt
+            --checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/debug4_resize2_{chalexmax_v3_3}_cl_{1}_ip_{$ip_band}_322_{9216}/model_best.pth.tar \
+            --results-file /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/scale_${imgscale}_chalexmax_v3_3_bypass_ip_${ip_band}.txt
         wait
 
     done

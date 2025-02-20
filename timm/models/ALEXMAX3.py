@@ -112,7 +112,125 @@ class C_scoring2(nn.Module):
 
         return out
     
+class C_scoring2_optimized(nn.Module):
+    """
+    C layer with learnable scoring function. 
+    This layer is used in the ALEXMAX_v3 model.
+    It resizes the image then applies convolutional filtering to the resized images.
+    The scores are computed using a learnable scoring function.
     
+    Args:
+        num_channels (int): Number of input channels
+        pool_func1 (nn.Module): Pooling function for the first input
+        pool_func2 (nn.Module): Pooling function for the second input
+        global_scale_pool (bool): Whether to use global scale pooling
+        
+    
+    """
+    
+    # Spatial then Scale
+    def __init__(self,
+                 num_channels,
+                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+                 pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+                 resize_kernel_1 =1,
+                 resize_kernel_2 =3,
+                 skip = 1,
+                 global_scale_pool=False):
+        super(C_scoring2, self).__init__()
+        self.pool1 = pool_func1
+        self.pool2 = pool_func2
+        self.global_scale_pool = global_scale_pool
+        self.num_channels = num_channels
+        self.scoring_conv = ConvScoring(num_channels)
+        self.skip = skip 
+        
+        # Learnable resizing layers
+        self.resizing_layers = nn.Sequential(
+            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_2, padding=1)
+        )  
+    
+    def forward(self, x_pyramid):
+        if self.global_scale_pool:
+            # (Keep your original global pooling branch here.)
+            if len(x_pyramid) == 1:
+                pooled = self.pool1(x_pyramid[0])
+                _ = self.scoring_conv(pooled)
+                return pooled
+
+            out = [self.pool1(x) for x in x_pyramid]
+            final_size = out[len(out) // 2].shape[-2:]
+            out_1 = F.interpolate(out[0], final_size, mode='bilinear', align_corners=False)
+            out_1 = self.resizing_layers(out_1)
+            for x in x_pyramid[1:]:
+                temp = F.interpolate(x, final_size, mode='bilinear', align_corners=False)
+                temp = self.resizing_layers(temp)
+                score_out = self.scoring_conv(out_1)
+                score_temp = self.scoring_conv(temp)
+                scores = torch.stack([score_out, score_temp], dim=1).unsqueeze(2)
+                x_stack = torch.stack([out_1, temp], dim=1)
+                out_1 = soft_selection(scores, x_stack)
+                del temp
+            return out_1
+        else:
+            # For the non-global pooling branch, we vectorize the loop over scale pairs.
+            if len(x_pyramid) == 1:
+                pooled = self.pool2(x_pyramid[0])
+                _ = self.scoring_conv(pooled)
+                return [pooled]
+
+            # Use the pyramid image at the middle scale to determine the final output size.
+            out_middle = self.pool2(x_pyramid[len(x_pyramid) // 2])
+            final_size = out_middle.shape[-2:]
+            # Compute indices over which to process pairs (using self.skip)
+            indices = list(range(0, len(x_pyramid) - 1, self.skip))
+            
+            # Process pooling and interpolation for all selected pairs:
+            # x1 from pool1 on the first image of each pair and x2 from pool2 on the second.
+            x1_list = [self.pool1(x_pyramid[i]) for i in indices]
+            x2_list = [self.pool2(x_pyramid[i + 1]) for i in indices]
+            x1_interp = [F.interpolate(x, size=final_size, mode='bilinear', align_corners=False)
+                        for x in x1_list]
+            x2_interp = [F.interpolate(x, size=final_size, mode='bilinear', align_corners=False)
+                        for x in x2_list]
+            
+            # Stack along a new (pair) dimension: shape (N_pair, B, C, H, W)
+            x1_batch = torch.stack(x1_interp, dim=0)
+            x2_batch = torch.stack(x2_interp, dim=0)
+            
+            # Merge the pair and batch dimensions to run the resizing layers in one go.
+            N_pair, B, C, H, W = x1_batch.shape
+            x1_reshaped = x1_batch.view(N_pair * B, C, H, W)
+            x2_reshaped = x2_batch.view(N_pair * B, C, H, W)
+            x1_resized = self.resizing_layers(x1_reshaped)
+            x2_resized = self.resizing_layers(x2_reshaped)
+            
+            # Apply the learnable scoring convolution.
+            s1 = self.scoring_conv(x1_resized)  # Expected shape: (N_pair*B, 1, H, W)
+            s2 = self.scoring_conv(x2_resized)
+            
+            # Reshape back to separate the pair and batch dimensions.
+            x1_resized = x1_resized.view(N_pair, B, C, H, W)
+            x2_resized = x2_resized.view(N_pair, B, C, H, W)
+            s1 = s1.view(N_pair, B, 1, H, W)
+            s2 = s2.view(N_pair, B, 1, H, W)
+            
+            # Stack the two images and their scores along a new dimension.
+            # x_stack will have shape: (N_pair, B, 2, C, H, W)
+            # scores will have shape: (N_pair, B, 2, 1, H, W)
+            x_stack = torch.stack([x1_resized, x2_resized], dim=2)
+            scores = torch.stack([s1, s2], dim=2)
+            
+            # Perform the soft selection in parallel over all pairs.
+            # (Assumes soft_selection is implemented to work on the leading dimensions.)
+            selected = soft_selection(scores, x_stack)  # Shape: (N_pair, B, C, H, W)
+            
+            # Return a list (as in the original code) if needed.
+            out = [selected[i] for i in range(N_pair)]
+            return out
+
 class ALEXMAX_v3(nn.Module):
     """
     ALEXMAX_v3 model. This model is an implementation of the HMAX model.
@@ -423,7 +541,7 @@ class ALEXMAX_v3_3(nn.Module):
                                 skip =2 ,
                                 global_scale_pool=False)
         self.s3 = S3()
-        if self.ip_scale_bands> 5:
+        if self.ip_scale_bands> 4:
             self.global_pool = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2),nn.MaxPool2d(kernel_size = 6, stride = 3,padding=1),resize_kernel_1 =3, resize_kernel_2 =1,skip =2 ,global_scale_pool=False)
         else:
             self.global_pool =  C(global_scale_pool=True)
@@ -525,9 +643,12 @@ class ALEXMAX_v3_4(nn.Module):
                                 global_scale_pool=False)
         self.s3 = S3()
         
-        self.global_pool_ip = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2),nn.MaxPool2d(kernel_size = 6, stride = 3,padding=1),resize_kernel_1 =3, resize_kernel_2 =1,skip =2 ,global_scale_pool=False)
         
         self.global_pool_main =  C(global_scale_pool=True)
+        if self.ip_scale_bands <4:
+            self.global_pool_ip = self.global_pool_main
+        else:
+            self.global_pool_ip = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2),nn.MaxPool2d(kernel_size = 6, stride = 3,padding=1),resize_kernel_1 =3, resize_kernel_2 =1,skip =2 ,global_scale_pool=False)
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(classifier_input_size, 4096),
@@ -575,7 +696,7 @@ class ALEXMAX_v3_4(nn.Module):
         
         out = self.s3(out_c2)
         
-        if len(out) > 2:
+        if not main_route:
             out = self.global_pool_ip(out)
         else:   
             out = self.global_pool_main(out)
@@ -690,7 +811,7 @@ class CHALEXMAX_V3_2(nn.Module):
         scale_factor = random.choice(scale_factor_list)
         img_hw = x.shape[-1]
         new_hw = int(img_hw*scale_factor)
-        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear')
         if new_hw <= img_hw:
             x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
         elif new_hw > img_hw:
@@ -741,7 +862,7 @@ class CHALEXMAX_V3_3(nn.Module):
         scale_factor = random.choice(scale_factor_list)
         img_hw = x.shape[-1]
         new_hw = int(img_hw*scale_factor)
-        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear')
         if new_hw <= img_hw:
             x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
         elif new_hw > img_hw:
@@ -793,7 +914,7 @@ class CHALEXMAX_V3(nn.Module):
         scale_factor = random.choice(scale_factor_list)
         img_hw = x.shape[-1]
         new_hw = int(img_hw*scale_factor)
-        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear').clamp(min=0, max=1)
+        x_rescaled = F.interpolate(x, size = (new_hw, new_hw), mode = 'bilinear')
         if new_hw <= img_hw:
             x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
         elif new_hw > img_hw:
