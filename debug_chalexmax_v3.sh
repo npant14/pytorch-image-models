@@ -16,9 +16,9 @@ module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-scale_bands=5
+scale_bands=7
 classifier_input_size=9216
-model=chalexmax_v3_3
+model=chalexmax_v3_3_optimized
 cl_lambda=1
 
 sh distributed_train.sh 2 train_skeleton.py \

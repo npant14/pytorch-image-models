@@ -18,9 +18,9 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 scale_bands=7
 classifier_input_size=9216
-model=alexmax_v3_3
+model=alexmax_v3_4
 
-sh distributed_train.sh 2 train_skeleton.py \
+sh distributed_train.sh 1 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $model \

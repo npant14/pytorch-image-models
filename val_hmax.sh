@@ -14,6 +14,7 @@
 
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
+model=chalexmax_v3_2
 
 for imgscale in 160 192 227 271 322 
 do
@@ -33,8 +34,8 @@ do
             -b 128 \
             --image-scale 3 $imgscale $imgscale \
             --input-size 3 322 322 \
-            --checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/debug4_resize2_{chalexmax_v3_3}_cl_{1}_ip_{$ip_band}_322_{9216}/model_best.pth.tar \
-            --results-file /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/scale_${imgscale}_chalexmax_v3_3_bypass_ip_${ip_band}.txt
+            --checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/debug4_resize2_{$model}_cl_{1}_ip_{$ip_band}_322_{9216}/model_best.pth.tar \
+            --results-file /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/scale_${imgscale}_{$model}_bypass_ip_${ip_band}.txt
         wait
 
     done

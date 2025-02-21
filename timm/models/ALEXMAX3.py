@@ -687,10 +687,10 @@ class ALEXMAX_v3_4(nn.Module):
         
         ## should make SxBxCxHxW
         out= self.s1(out)
-        out_c1 = self.c1(out)
+        out_c1 = self.c1(out)    
         out = self.s2(out_c1)
         out_c2 = self.c2(out)
-
+        
         if pyramid:
             return out_c1[0],out_c2[0]
         
@@ -1017,6 +1017,18 @@ def alexmax_v3_3(pretrained=False, **kwargs):
     if pretrained:
        raise ValueError("No pretrained model available for ALEXMAX_v3")
     model = ALEXMAX_v3_3(**kwargs)
+    return model
+@register_model
+def alexmax_v3_4(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    if pretrained:
+       raise ValueError("No pretrained model available for ALEXMAX_v3")
+    model = ALEXMAX_v3_4(**kwargs)
     return model
 
 # @register_model
