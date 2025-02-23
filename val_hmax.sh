@@ -16,7 +16,7 @@
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 model=chalexmax_v3_2
 
-for imgscale in 160 192 227 271 322 
+for imgscale in 160 192 227 271 322 384 456 542 644 
 do
     for ip_band in 7
     do  
