@@ -9,13 +9,19 @@ import numpy as np
 import scipy as sp
 import time
 import pdb
+import torchvision
+import numpy as np
+import random
+
 
 from ._builder import build_model_with_cfg
 from ._manipulate import checkpoint_seq
 from ._registry import register_model, generate_default_cfgs
 from .ALEXMAX import C_scoring, C
 from .ALEXMAX3 import C_scoring2
-from .HMAX import get_ip_scales
+from .ALEXMAX3_optimized import C_scoring2_optimized
+from .HMAX import get_ip_scales, pad_to_size
+
 
 class Residual(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, strides=1):
@@ -635,7 +641,6 @@ class RESMAX_V1(nn.Module):
 
         return out
 
-from .ALEXMAX3_optimized import C_scoring2_optimized
 
 class RESMAX_V2(nn.Module):
     def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
@@ -758,7 +763,7 @@ class RESMAX_V2(nn.Module):
         # S2
         out = self.s2(out_c1)
         # C2
-        out = self.c2(out)
+        out_c2 = self.c2(out)
         
         if self.bypass:
         # s2b # input torch.Size([128, 96, 28, 28])
@@ -767,8 +772,13 @@ class RESMAX_V2(nn.Module):
             bypass = bypass.reshape(bypass.size(0), -1)
 
         # s3
-        out = self.s3(out)
+        out = self.s3(out_c2)
         out = self.global_pool(out) # out shape: torch.Size([128, 256, 6, 6])
+
+        if isinstance(out, list):
+            # If multi-scale, pick first
+            out = out[0]
+
         out = out.reshape(out.size(0), -1)
 
         # merge bypass and main path
@@ -781,7 +791,76 @@ class RESMAX_V2(nn.Module):
         out = self.fc1(out)
         out = self.fc2(out)
 
+        if self.contrastive_loss:
+            # For contrastive usage, return (final out, c1[0], c2[0])
+            return out, out_c1[0], out_c2[0]
+
         return out
+    
+
+class CHRESMAX_V2(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        stream_1_output, stream_1_c1_feats, stream_1_c2_feats = self.model_backbone(x)
+
+        # stream 2 (random scale)
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        else:
+            # center-crop if bigger
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        # forward pass on the scaled input
+        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
+
+        # scale-consistency loss
+        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
+        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss
+
+        return stream_1_output, correct_scale_loss
     
 @register_model
 def resmax(pretrained=False, **kwargs):
@@ -868,5 +947,20 @@ def resmax_v2(pretrained=False, **kwargs):
     model = RESMAX_V2(**kwargs)
     if pretrained:
         pass
+    return model
+
+
+@register_model
+def chresmax_v2(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    if pretrained:
+        pass
+    model = CHRESMAX_V2(**kwargs)
     return model
 
