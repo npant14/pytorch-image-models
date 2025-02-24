@@ -226,16 +226,16 @@ class ALEXMAX_v3_1(nn.Module):
       
         self.c1= C_scoring2(96,nn.MaxPool2d(kernel_size = 3, stride = 2), 
                                nn.MaxPool2d(kernel_size = 4, stride = 3), 
-                               skip=2,
+                               skip=1,
                                global_scale_pool=False)
         #self.s2b = S2b()
         #self.c2b = C(nn.MaxPool2d(kernel_size = 3, stride = 2), nn.MaxPool2d(kernel_size = 3, stride = 2), global_scale_pool=False)
-        self.s2 = S2(kernel_size=3, stride=1, padding=2)
+        self.s2 = S2(kernel_size=3, stride=1)
         self.c2 = C_scoring2(256,nn.MaxPool2d(kernel_size = 3, stride = 2,padding=1), 
-                                nn.MaxPool2d(kernel_size = 6, stride = 2),
-                                resize_kernel_1 =3, 
-                                resize_kernel_2 =1,
-                                skip =2 ,
+                                nn.MaxPool2d(kernel_size = 3, stride = 2),
+                                resize_kernel_1 =1, 
+                                resize_kernel_2 =3,
+                                skip =1 ,
                                 global_scale_pool=False)
         self.s3 = S3()
         self.global_pool =  C(global_scale_pool=True)
@@ -454,7 +454,7 @@ def alexmax_v3(pretrained=False, **kwargs):
     except:
         pass
     if pretrained:
-       raise ValueError("No pretrained model available for ALEXMAX_v3")
+       pass
     model = ALEXMAX_v3(**kwargs)
     return model
 
@@ -467,7 +467,7 @@ def alexmax_v3_1(pretrained=False, **kwargs):
     except:
         pass
     if pretrained:
-       raise ValueError("No pretrained model available for ALEXMAX_v3")
+        pass
     model = ALEXMAX_v3_1(**kwargs)
     return model
 
