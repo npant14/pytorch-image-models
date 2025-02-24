@@ -39,6 +39,7 @@ import schedulefree
 
 import yaml
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
+import itertools
 
 from timm import utils
 from timm.data import create_dataset, create_loader, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
@@ -1225,10 +1226,15 @@ def validate(
     top1_m = utils.AverageMeter()
     top5_m = utils.AverageMeter()
 
-    model.eval()
+    
     if args.add_wrapped_schedulefree:
+        model.train()
         optimizer.eval()
+        with torch.no_grad():
+            for batch in itertools.islice(loader, 50):
+                model(batch)
 
+    model.eval()
     end = time.time()
     last_idx = len(loader) - 1
     with torch.no_grad():
