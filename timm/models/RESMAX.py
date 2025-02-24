@@ -635,7 +635,154 @@ class RESMAX_V1(nn.Module):
 
         return out
 
+from .ALEXMAX3_optimized import C_scoring2_optimized
 
+class RESMAX_V2(nn.Module):
+    def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
+                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False,
+                 bypass=False, main_route=False,
+                 c_scoring='v2',
+                 **kwargs):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
+        self.big_size = big_size
+        self.small_size = small_size
+        self.bypass = bypass
+        self.c_scoring = c_scoring
+        self.main_route = main_route
+        super(RESMAX_V2, self).__init__()
+
+        self.s1 = S1_Res()
+
+        # C1 using optimized layer
+        self.c1 = C_scoring2_optimized(
+            num_channels=96,
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+            pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+            skip=1,
+            global_scale_pool=False
+        )
+        
+        self.s2 = S2_Res()
+        # C2 using optimized layer
+        self.c2 = C_scoring2_optimized(
+            num_channels=256,
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            pool_func2=nn.MaxPool2d(kernel_size=6, stride=2),
+            resize_kernel_1=3,
+            resize_kernel_2=1,
+            skip=2,
+            global_scale_pool=False
+        )
+        
+        if self.bypass == True:
+            self.s2b = S2b_Res()
+            self.c2b_seq = nn.Sequential(
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.Conv2d(1024, 256, kernel_size=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True)
+            )
+
+        self.s3 = S3_Res()
+        # If ip_scale_bands > 4, use a multi-scale final C_scoring2_optimized
+        if self.ip_scale_bands > 4:
+            self.global_pool = C_scoring2_optimized(
+                num_channels=256,
+                pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+                pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
+                resize_kernel_1=3,
+                resize_kernel_2=1,
+                skip=2,
+                global_scale_pool=False
+            )
+        else:
+            # Else use a single-scale global pool
+            self.global_pool = C(global_scale_pool=True)
+        
+        # Keep classifier layers the same
+        self.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 4096),
+            nn.ReLU()
+        )
+        self.fc1 = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU()
+        )
+        self.fc2 = nn.Sequential(
+            nn.Linear(4096, num_classes)
+        )
+
+    def make_ip(self, x, num_scale_bands):
+        """
+        Build an image pyramid.
+        num_scale_bands = number of images in the pyramid - 1
+        """
+        base_image_size = int(x.shape[-1])
+        scale_factor = 4  # exponent factor for scaling
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale_factor)
+        
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interp_img = F.interpolate(x, size=(i_s, i_s), mode='bilinear', align_corners=False)
+                image_pyramid.append(interp_img)
+            return image_pyramid
+        else:
+            return [x]
+
+    def forward(self, x, pyramid=False):
+        """
+        x: [N, C, H, W]
+        pyramid (bool): if True, return c1[0], c2[0] for external usage
+        main_route (bool): if True, only build 2-scale pyramid; else ip_scale_bands scales
+        """
+        # Decide how many scales to build
+        if self.main_route:
+            # 2 total scales => effectively 1 band
+            out = self.make_ip(x, 2)
+        else:
+            out = self.make_ip(x, self.ip_scale_bands)
+        
+        # S1
+        out = self.s1(out)
+        # C1
+        out_c1 = self.c1(out)
+        # S2
+        out = self.s2(out_c1)
+        # C2
+        out = self.c2(out)
+        
+        if self.bypass:
+        # s2b # input torch.Size([128, 96, 28, 28])
+            bypass = self.s2b(out_c1) # torch.Size([128, 1024, 28, 28])
+            bypass = self.c2b_seq(bypass[0]) # torch.Size([128, 256, 6, 6])
+            bypass = bypass.reshape(bypass.size(0), -1)
+
+        # s3
+        out = self.s3(out)
+        out = self.global_pool(out) # out shape: torch.Size([128, 256, 6, 6])
+        out = out.reshape(out.size(0), -1)
+
+        # merge bypass and main path
+        if self.bypass:
+            out = torch.cat([out, bypass], dim=1)
+        # out += bypass
+
+        # fc layers
+        out = self.fc(out)
+        out = self.fc1(out)
+        out = self.fc2(out)
+
+        return out
+    
 @register_model
 def resmax(pretrained=False, **kwargs):
     #deleting some kwargs that are messing up training
@@ -708,4 +855,18 @@ def resmax_v1(pretrained=False, **kwargs):
         pass
     return model
 
+
+@register_model
+def resmax_v2(pretrained=False, **kwargs):
+    #deleting some kwargs that are messing up training
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    model = RESMAX_V2(**kwargs)
+    if pretrained:
+        pass
+    return model
 
