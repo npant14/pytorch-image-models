@@ -4,10 +4,10 @@
 #SBATCH -n 8
 #SBATCH -N 1
 #SBATCH --mem=60GB
-#SBATCH -o chresmax_v2_ip3.out
-#SBATCH -e chresmax_v2_ip3.err
+#SBATCH -o chresmax_v2_ip3_wobypass.out
+#SBATCH -e chresmax_v2_ip3_wobypass.err
 #SBATCH --account=carney-tserre-condo
-#SBATCH -J chresmax_v2_ip3
+#SBATCH -J chresmax_v2_ip3_wobypass
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -25,7 +25,7 @@ sleep 10
 DATASET="torch/imagenet"
 # MODEL="resmax_v2"
 MODEL="chresmax_v2"
-CLASSIFIER_INPUT_SIZE=18432
+CLASSIFIER_INPUT_SIZE=9216
 CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
 GPUS=8
@@ -38,7 +38,7 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset $DATASET \
     --model $MODEL \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=True\
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=False\
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b $BATCH_SIZE \

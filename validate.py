@@ -324,18 +324,17 @@ def validate(args):
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     print("image size:", args.image_scale)
 
+    # take one image from the loader
+    sample_image, _ = next(iter(loader))
+
     #####PADDING FOR VALIDATION################
-    transform = RandomResizePad(original_size=target_size, min_size=args.image_scale[1], max_size=args.image_scale[1])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
     loader = DataLoaderTransformWrapper(loader, transform)
 
     visualize = False
     if visualize == True:
-        visualize_dataloader_samples(
-            loader=loader,
-            target_size=target_size,
-            num_images=16,
-            save_path='dataloader_samples.png'
-        )
+        scales = [160, 192, 227, 322, 382, 454]
+        visualize_transforms(sample_image, scales, target_size)
         exit(0)
     
     # import numpy as np

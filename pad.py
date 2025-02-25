@@ -1,5 +1,6 @@
 import random
 import torch
+import numpy as np
 from typing import Iterator
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
@@ -134,6 +135,81 @@ class RandomResizePad:
         return padded_img
     
 
+class CenterResizeCropPad:
+    def __init__(self, output_size=(227, 227), scale=160):
+        """
+        Transform that handles different scale invariances.
+        
+        Args:
+            output_size (tuple): The final output size (height, width) that the network expects
+            scale (int): The scale invariance to test
+                        If scale <= min(output_size), the image is resized to scale and center-padded
+                        If scale > min(output_size), the image is resized to scale and center-cropped
+        """
+        self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        self.scale = scale
+        
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor): Image tensor of shape (C, H, W)
+        Returns:
+            Tensor: Transformed image tensor of shape (C, output_size[0], output_size[1])
+        """
+        # Get original image dimensions
+        _, orig_h, orig_w = img.shape
+        
+        # Calculate aspect ratio
+        aspect_ratio = orig_w / orig_h
+        
+        # Determine new height and width based on scale while maintaining aspect ratio
+        # Set the smaller dimension to scale
+        if aspect_ratio > 1:  # Width > Height (scale applies to height)
+            new_h = self.scale
+            new_w = int(self.scale * aspect_ratio)
+        else:  # Height >= Width (scale applies to width)
+            new_w = self.scale
+            new_h = int(self.scale / aspect_ratio)
+        
+        # Resize image to the target scale
+        resized_img = TF.resize(img, (new_h, new_w))
+        
+        # Case 1: If scale <= min(output_size), pad to output_size
+        if self.scale <= min(self.output_size):
+            # Calculate padding needed for each dimension
+            pad_h = max(self.output_size[0] - new_h, 0)
+            pad_w = max(self.output_size[1] - new_w, 0)
+            
+            # Calculate padding for each side (center padding)
+            pad_top = pad_h // 2
+            pad_bottom = pad_h - pad_top
+            pad_left = pad_w // 2
+            pad_right = pad_w - pad_left
+            
+            # Apply padding
+            transformed_img = F.pad(
+                resized_img,
+                (pad_left, pad_right, pad_top, pad_bottom),
+                mode='constant',
+                value=0
+            )
+        
+        # Case 2: If scale > min(output_size), center crop to output_size
+        else:
+            # Calculate crop coordinates
+            crop_h = self.output_size[0]
+            crop_w = self.output_size[1]
+            
+            # Calculate top-left coordinates for center crop
+            top = (new_h - crop_h) // 2
+            left = (new_w - crop_w) // 2
+            
+            # Apply center crop
+            transformed_img = TF.crop(resized_img, top, left, crop_h, crop_w)
+        
+        return transformed_img
+    
+
 class DataLoaderTransformWrapper:
     def __init__(self, dataloader: DataLoader, transform=None):
         """
@@ -183,34 +259,58 @@ class DataLoaderTransformWrapper:
     def __getattr__(self, name):
         return getattr(self.dataloader, name)
 
-def visualize_dataloader_samples(loader, target_size, num_images=16, save_path='dataloader_samples.png'):
+def visualize_transforms(img, scales, target_size=(322, 322), save_path="transform_visualization.png"):
     """
-    Visualize and save samples from dataloader
+    Visualize how an image looks after applying CenterResizeCropPad transform at different scales.
+    
     Args:
-        loader: PyTorch dataloader
-        num_images (int): Number of images to visualize
+        img: Input image tensor (B, C, H, W) - can be on CPU or GPU
+        scales (list): List of scale values to visualize
+        target_size (tuple): Output size for the transform
         save_path (str): Path to save the visualization
     """
-    # Get a batch of images
-    images, _ = next(iter(loader))
-    images = pad_batch_random(images, target_size)
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
     
-    # Select only the number of images we want to display
-    images = images[:num_images]
+    # Make sure we're working with a single image (not a batch)
+    if img.dim() == 4:
+        img_tensor = img[0]  # Take the first image if it's a batch
+    else:
+        img_tensor = img
     
-    # Create a grid of images
-    grid = vutils.make_grid(images, nrow=4, padding=2, normalize=True)
+    # Create figure for visualization
+    n_scales = len(scales)
+    fig, axes = plt.subplots(1, n_scales + 1, figsize=(4 * (n_scales + 1), 4))
     
-    # Convert to numpy and transpose for plotting
-    grid = grid.cpu().numpy().transpose((1, 2, 0))
+    # Display original image - move to CPU first
+    orig_img = img_tensor.cpu().permute(1, 2, 0).numpy()
+    orig_img = np.clip(orig_img, 0, 1)
+    axes[0].imshow(orig_img)
+    axes[0].set_title(f'Original ({orig_img.shape[1]}x{orig_img.shape[0]})')
+    axes[0].axis('off')
     
-    # Create figure and display
-    plt.figure(figsize=(15, 15))
-    plt.axis('off')
-    plt.imshow(grid)
+    # Apply transforms at different scales and visualize
+    for i, scale in enumerate(scales):
+        transform = CenterResizeCropPad(output_size=target_size, scale=scale)
+        transformed_tensor = transform(img_tensor)
+        
+        # Convert tensor back to numpy for visualization - move to CPU first
+        transformed_img = transformed_tensor.cpu().permute(1, 2, 0).numpy()
+        # Clip values to be between 0 and 1
+        transformed_img = np.clip(transformed_img, 0, 1)
+        
+        # Display transformed image
+        axes[i+1].imshow(transformed_img)
+        
+        # Add title indicating whether it's padded or cropped
+        if scale <= min(target_size):
+            mode = "padded"
+        else:
+            mode = "cropped"
+        axes[i+1].set_title(f'Scale {scale} ({mode})')
+        axes[i+1].axis('off')
     
-    # Save the figure
-    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-    plt.close()
-    
+    plt.tight_layout()
+    plt.savefig(save_path)
     print(f"Visualization saved to {save_path}")
