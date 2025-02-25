@@ -72,7 +72,7 @@ def pad_batch(images, target_size):
 
 
 class RandomResizePad:
-    def __init__(self, original_size=(227, 227), min_size=160):
+    def __init__(self, original_size=(227, 227), min_size=160, max_size=None):
         """
         Args:
             original_size (tuple): Original image size (height, width)
@@ -80,8 +80,12 @@ class RandomResizePad:
         """
         self.original_size = original_size
         self.min_size = min_size
-        self.max_size = original_size[0]
-        print("Size range:", self.min_size, "-", self.max_size)
+        if max_size is None:
+            self.max_size = original_size[0]
+            print("Max size not provided. Setting to original size.")
+        else:
+            self.max_size = max_size
+        print("Random Resize range:", self.min_size, "-", self.max_size)
 
     def __call__(self, img):
         """

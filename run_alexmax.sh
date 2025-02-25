@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=72:00:00
+#SBATCH --time=120:00:00
 #SBATCH -p gpu --gres=gpu:8
 #SBATCH -n 8
 #SBATCH -N 1
@@ -7,10 +7,10 @@
 #SBATCH -o alexmax_cl_0_ip_5.out
 #SBATCH -e alexmax_cl_0_ip_5.err
 #SBATCH --mem=60GB
-#SBATCH -o resmax_v1_ip1_bypass.out
-#SBATCH -e resmax_v1_ip1_bypass.err
+#SBATCH -o chresmax_v2_ip3.out
+#SBATCH -e chresmax_v2_ip3.err
 #SBATCH --account=carney-tserre-condo
-#SBATCH -J resmax_v1_ip1_bypass
+#SBATCH -J chresmax_v2_ip3
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -26,13 +26,14 @@ sleep 10
 
 # Parameters
 DATASET="torch/imagenet"
-# MODEL="vggmax_v1"
-MODEL="resmax_v1"
+# MODEL="resmax_v2"
+MODEL="chresmax_v2"
 CLASSIFIER_INPUT_SIZE=18432
 CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
 GPUS=8
-IP_BANDS=1
+IP_BANDS=3
+BATCH_SIZE=32
 EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]"
 # EXPERIMENT_NAME="test"
 
@@ -40,11 +41,11 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset $DATASET \
     --model $MODEL \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=True \
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=True\
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b 128 \
-    --epochs 120 \
+    --epochs 90 \
     --lr 1e-2 \
     --weight-decay 5e-4 \
     --sched step \
