@@ -105,7 +105,7 @@ transform_pipeline = transforms.Compose([
     transforms.ToTensor()
 ])
 
-csv_file = "/oscar/scratch/vnema/foreground_proportions_with_rescaled_centers.csv"
+csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
 root_dir = "/gpfs/data/tserre/npant1/ILSVRC/train"
 mask_lookup_json = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
 
@@ -117,12 +117,12 @@ dataset = ScaledImagenetDataset(
 )
 
 dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
-"""
+
 for i_batch, sample_batched in enumerate(dataloader):
     if i_batch == 0:
-        output_dir = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/output_figures"
+        output_dir = "/users/irodri15/data/irodri15/Hmax/pytorch-image-models/"
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
         show_batch(sample_batched, save_path=save_path)
         break
-"""
+
