@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
 # Load WordNet ID to Class Label Mapping from text file
-wordnet_to_label_txt = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
+wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
 wordnet_to_label = {}
 with open(wordnet_to_label_txt, 'r') as f:
     for line in f:
@@ -105,9 +105,9 @@ transform_pipeline = transforms.Compose([
     transforms.ToTensor()
 ])
 
-csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
+csv_file = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
 root_dir = "/gpfs/data/tserre/npant1/ILSVRC/train"
-mask_lookup_json = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
+mask_lookup_json = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
 
 dataset = ScaledImagenetDataset(
     csv_file=csv_file,
