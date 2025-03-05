@@ -51,6 +51,7 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --decay-epochs 30 \
     --warmup-epochs 0 \
     --hflip 0.5 \
+    --scale 1.0 1.0 \
     --train-crop-mode rrc \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \

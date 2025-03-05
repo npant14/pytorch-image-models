@@ -34,6 +34,7 @@ from timm.utils import accuracy, AverageMeter, natural_key, setup_default_loggin
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
 
 from pad import *
+from brainscore_benchmark import Brainscore_Experiment
 
 try:
     from apex import amp
@@ -358,6 +359,23 @@ def validate(args):
     top5 = AverageMeter()
 
     model.eval()
+
+    # do brain score evaluation
+    if args.model_kwargs['brainscore'] == True:
+        print("Running brainscore evaluation")
+        be = Brainscore_Experiment(model, "test_brainscore", device)
+        for compare in [0,1,2,3,4,5]:
+            be.rdm_corr_func(scale_test_list=[compare,2], save_rdms_list=
+                             ["module.layer1.1.conv2",
+                                            "module.layer2.0.conv2",
+                                            "module.layer2.1.conv2",
+                                            "module.layer3.0.conv2",
+                                            "module.layer3.1.conv2",
+                                            "module.layer4.0.conv2",
+                                            "module.layer4.1.conv2",
+                                            "module.fc"])
+
+    # do normal evaluation
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
