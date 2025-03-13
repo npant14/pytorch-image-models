@@ -17,17 +17,20 @@ import torch.utils.data
 import numpy as np
 
 from .constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from .dataset import IterableImageDataset, ImageDataset
+from .dataset import IterableImageDataset, ImageDataset,ScaledImagenetDataset
 from .distributed_sampler import OrderedDistributedSampler, RepeatAugSampler
 from .random_erasing import RandomErasing
 from .mixup import FastCollateMixup
 from .transforms_factory import create_transform
+from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 _logger = logging.getLogger(__name__)
 
 
 def fast_collate(batch):
     """ A fast collation function optimized for uint8 images (np array or torch) and int64 targets (labels)"""
+    
     assert isinstance(batch[0], tuple)
     batch_size = len(batch)
     if isinstance(batch[0][0], tuple):
@@ -71,6 +74,105 @@ def adapt_to_chs(x, n):
     else:
         assert len(x) == n, 'normalization stats must match image channels'
     return x
+
+class PrefetchLoaderScale:
+
+    def __init__(
+            self,
+            loader,
+            mean=IMAGENET_DEFAULT_MEAN,
+            std=IMAGENET_DEFAULT_STD,
+            channels=3,
+            device=torch.device('cuda'),
+            img_dtype=torch.float32,
+            fp16=False,
+            re_prob=0.,
+            re_mode='const',
+            re_count=1,
+            re_num_splits=0):
+
+        mean = adapt_to_chs(mean, channels)
+        std = adapt_to_chs(std, channels)
+        normalization_shape = (1, channels, 1, 1)
+
+        self.loader = loader
+        self.device = device
+        if fp16:
+            # fp16 arg is deprecated, but will override dtype arg if set for bwd compat
+            img_dtype = torch.float16
+        self.img_dtype = img_dtype
+        self.mean = torch.tensor(
+            [x * 255 for x in mean], device=device, dtype=img_dtype).view(normalization_shape)
+        self.std = torch.tensor(
+            [x * 255 for x in std], device=device, dtype=img_dtype).view(normalization_shape)
+        if re_prob > 0.:
+            self.random_erasing = RandomErasing(
+                probability=re_prob,
+                mode=re_mode,
+                max_count=re_count,
+                num_splits=re_num_splits,
+                device=device,
+            )
+        else:
+            self.random_erasing = None
+        self.is_cuda = torch.cuda.is_available() and device.type == 'cuda'
+
+    def __iter__(self):
+        first = True
+        if self.is_cuda:
+            stream = torch.cuda.Stream()
+            stream_context = partial(torch.cuda.stream, stream=stream)
+        else:
+            stream = None
+            stream_context = suppress
+
+        for next_input, next_target,next_scale in self.loader:
+
+            with stream_context():
+                next_input = next_input.to(device=self.device, non_blocking=True)
+                next_target = next_target.to(device=self.device, non_blocking=True)
+                next_scale = next_scale.to(device=self.device, non_blocking=True)
+                next_input = next_input.to(self.img_dtype).sub_(self.mean).div_(self.std)
+                if self.random_erasing is not None:
+                    next_input = self.random_erasing(next_input)
+
+            if not first:
+                yield input, target, scale 
+            else:
+                first = False
+
+            if stream is not None:
+                torch.cuda.current_stream().wait_stream(stream)
+
+            input = next_input
+            target = next_target
+            scale = next_scale
+
+        yield input, target,scale
+
+    def __len__(self):
+        return len(self.loader)
+
+    @property
+    def sampler(self):
+        return self.loader.sampler
+
+    @property
+    def dataset(self):
+        return self.loader.dataset
+
+    @property
+    def mixup_enabled(self):
+        if isinstance(self.loader.collate_fn, FastCollateMixup):
+            return self.loader.collate_fn.mixup_enabled
+        else:
+            return False
+
+    @mixup_enabled.setter
+    def mixup_enabled(self, x):
+        if isinstance(self.loader.collate_fn, FastCollateMixup):
+            self.loader.collate_fn.mixup_enabled = x
+
 
 
 class PrefetchLoader:
@@ -185,6 +287,144 @@ def _worker_init(worker_id, worker_seeding='all'):
         if worker_seeding == 'all':
             np.random.seed(worker_info.seed % (2 ** 32 - 1))
 
+def create_loader_scale(
+        csv_file: str,
+        root_dir: str,
+        root :str, 
+        input_size: Union[int, Tuple[int, int], Tuple[int, int, int]],
+        batch_size: int,
+        is_training: bool = False,
+        no_aug: bool = False,
+        re_prob: float = 0.,
+        re_mode: str = 'const',
+        re_count: int = 1,
+        re_split: bool = False,
+        train_crop_mode: Optional[str] = None,
+        scale: Optional[Tuple[float, float]] = None,
+        ratio: Optional[Tuple[float, float]] = None,
+        hflip: float = 0.5,
+        vflip: float = 0.,
+        color_jitter: float = 0.4,
+        color_jitter_prob: Optional[float] = None,
+        grayscale_prob: float = 0.,
+        gaussian_blur_prob: float = 0.,
+        auto_augment: Optional[str] = None,
+        num_aug_repeats: int = 0,
+        num_aug_splits: int = 0,
+        interpolation: str = 'bilinear',
+        mean: Tuple[float, ...] = IMAGENET_DEFAULT_MEAN,
+        std: Tuple[float, ...] = IMAGENET_DEFAULT_STD,
+        num_workers: int = 1,
+        distributed: bool = False,
+        crop_pct: Optional[float] = None,
+        crop_mode: Optional[str] = None,
+        crop_border_pixels: Optional[int] = None,
+        collate_fn: Optional[Callable] = None,
+        pin_memory: bool = False,
+        fp16: bool = False,  # deprecated, use img_dtype
+        img_dtype: torch.dtype = torch.float32,
+        device: torch.device = torch.device('cuda'),
+        use_prefetcher: bool = False,
+        use_multi_epochs_loader: bool = False,
+        persistent_workers: bool = True,
+        worker_seeding: str = 'all',
+        tf_preprocessing: bool = False,
+        # New parameter for the scaled loader:
+        crop_size: int = 322,
+):
+    """
+    This function creates a DataLoader for a ScaledImagenetDataset.
+    In this loader the final crop size is specified by `crop_size` and the image is first
+    resized to a proportional size computed as:
+         resize_size = round(crop_size * (256/224))
+    and then center cropped to (crop_size, crop_size).
+
+    All the remaining parameters are the same as in `create_loader` from timm.
+    Note: Because the logic for computing a “center” relies on a fixed resize + center crop,
+          any random augmentation (e.g. RandomResizedCrop) is disabled here.
+    """
+
+    # Instantiate your custom dataset.
+    dataset = ScaledImagenetDataset(csv_file, root_dir,root=root, transform=None, crop_size=crop_size)
+
+    # Compute the resize size to preserve the ratio (e.g. 224->256)
+    resize_size = int(round(crop_size * (256 / 224)))
+
+    # Create a fixed (deterministic) transform:
+    # Here we use a Resize (to resize_size) followed by a CenterCrop (to crop_size).
+    # You may adjust this pipeline if you wish to incorporate further (deterministic) augmentations.
+    transform = transforms.Compose([
+        transforms.Resize((resize_size, resize_size), interpolation=InterpolationMode.BILINEAR),
+        transforms.CenterCrop((crop_size, crop_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
+    dataset.transform = transform
+
+    # (If your dataset is Iterable, pass along the num_workers info.)
+    if isinstance(dataset, IterableImageDataset):
+        dataset.set_loader_cfg(num_workers=num_workers)
+
+    # Build the sampler
+    sampler = None
+    if distributed and not isinstance(dataset, torch.utils.data.IterableDataset):
+        if is_training:
+            if num_aug_repeats:
+                sampler = RepeatAugSampler(dataset, num_repeats=num_aug_repeats)
+            else:
+                sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        else:
+            sampler = OrderedDistributedSampler(dataset)
+    else:
+        assert num_aug_repeats == 0, "RepeatAugment not supported in non-distributed or IterableDataset use"
+
+    # Decide on a collate function
+    if collate_fn is None:
+        collate_fn =  torch.utils.data.dataloader.default_collate
+
+    # Pick the DataLoader class
+    loader_class = torch.utils.data.DataLoader
+    if use_multi_epochs_loader:
+        loader_class = MultiEpochsDataLoader
+
+    re_num_splits = 0
+    if re_split:
+        re_num_splits = num_aug_splits or 2
+
+    loader_args = dict(
+        batch_size=batch_size,
+        shuffle=(not isinstance(dataset, torch.utils.data.IterableDataset)) and (sampler is None) and is_training,
+        num_workers=num_workers,
+        sampler=sampler,
+        collate_fn=collate_fn,
+        pin_memory=pin_memory,
+        drop_last=is_training,
+        worker_init_fn=partial(_worker_init, worker_seeding=worker_seeding),
+        persistent_workers=persistent_workers,
+    )
+    try:
+        loader = loader_class(dataset, **loader_args)
+    except TypeError as e:
+        loader_args.pop('persistent_workers')  # for older PyTorch versions
+        loader = loader_class(dataset, **loader_args)
+
+    if use_prefetcher:
+        prefetch_re_prob = re_prob if is_training and not no_aug else 0.
+        loader = PrefetchLoaderScale(
+            loader,
+            mean=mean,
+            std=std,
+            channels=input_size[0] if isinstance(input_size, (tuple, list)) else 3,
+            device=device,
+            fp16=fp16,
+            img_dtype=img_dtype,
+            re_prob=prefetch_re_prob,
+            re_mode=re_mode,
+            re_count=re_count,
+            re_num_splits=re_num_splits
+        )
+
+    return loader
 
 def create_loader(
         dataset: Union[ImageDataset, IterableImageDataset],

@@ -32,6 +32,7 @@ def load_state_dict(
         checkpoint_path: str,
         use_ema: bool = True,
         device: Union[str, torch.device] = 'cpu',
+        weights_only: bool = False
 ) -> Dict[str, Any]:
     if checkpoint_path and os.path.isfile(checkpoint_path):
         # Check if safetensors or not and load weights accordingly
@@ -39,7 +40,7 @@ def load_state_dict(
             assert _has_safetensors, "`pip install safetensors` to use .safetensors"
             checkpoint = safetensors.torch.load_file(checkpoint_path, device=device)
         else:
-            checkpoint = torch.load(checkpoint_path, map_location=device)
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=weights_only)
 
         state_dict_key = ''
         if isinstance(checkpoint, dict):
@@ -67,6 +68,7 @@ def load_checkpoint(
         strict: bool = True,
         remap: bool = False,
         filter_fn: Optional[Callable] = None,
+        weights_only: bool = False,
 ):
     if os.path.splitext(checkpoint_path)[-1].lower() in ('.npz', '.npy'):
         # numpy checkpoint, try to load via model specific load_pretrained fn
@@ -76,7 +78,7 @@ def load_checkpoint(
             raise NotImplementedError('Model cannot load numpy checkpoint')
         return
 
-    state_dict = load_state_dict(checkpoint_path, use_ema, device=device)
+    state_dict = load_state_dict(checkpoint_path, use_ema, device=device, weights_only=weights_only)
     if remap:
         state_dict = remap_state_dict(state_dict, model)
     elif filter_fn:

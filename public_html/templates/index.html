@@ -1,0 +1,145 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ImageNet Mask Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 10px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .class-row {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            padding: 10px;
+            background: #fff;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .image-pair {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+        }
+        .image-pair img {
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 5px;
+        }
+        .lightbox {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+        .lightbox-content {
+            display: flex;
+            gap: 10px;
+        }
+        .lightbox img {
+            max-width: 45vw;
+            max-height: 80vh;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="image-container"></div>
+    
+    <div class="lightbox" id="lightbox">
+        <div class="lightbox-content">
+            <img id="full-img1" src="">
+            <img id="full-img2" src="">
+        </div>
+    </div>
+    
+    <script>
+        const imageContainer = document.getElementById("image-container");
+        const lightbox = document.getElementById("lightbox");
+        const fullImg1 = document.getElementById("full-img1");
+        const fullImg2 = document.getElementById("full-img2");
+        
+        const apiBaseUrl = "/get_images/";
+
+        const classes = ["n01440764", "n01775062", "n02086079", "n02106030", "n02190166", "n02504013", "n02906734", "n03223299", "n03627232", "n03873416", 
+        "n04120489", "n04389033", "n07583066", "n01443537", "n01776313", "n02086240", "n02106166", "n02206856", "n02504458", "n02909870", 
+        "n03240683", "n03630383", "n03874293", "n04125021", "n04392985", "n07584110", "n01484850", "n01784675", "n02086646", "n02106382", 
+        //"n02219486", "n02509815", "n02910353", "n03249569", "n03633091", "n03874599", "n04127249", "n04398044", "n07590611", "n01491361", 
+        //"n01795545", "n02086910", "n02106550", "n02226429", "n02510455", "n02916936", "n03250847", "n03637318", "n03876231", "n04131690", 
+        "n04399382", "n07613480", "n07614500", "n07615774"]; // Add more classes as needed
+        
+        async function getImagesFromServer(classId) {
+            const response = await fetch(apiBaseUrl + classId);
+            if (!response.ok) return [];
+            return await response.json();
+        }
+        
+        async function loadImages() {
+            for (const classId of classes) {
+                let row = document.createElement("div");
+                row.classList.add("class-row");
+                
+                let images = await getImagesFromServer(classId);
+                if (images.length === 0) continue;
+                
+                images.forEach(imgData => {
+                    let imagePair = document.createElement("div");
+                    imagePair.classList.add("image-pair");
+        
+                    // Thumbnail (Show mask directly, no lazy loading for thumbnails)
+                    let thumbImg = document.createElement("img");
+                    thumbImg.src = imgData.thumbnail;  // Set src directly
+                    thumbImg.classList.add("thumbnail");
+        
+                    imagePair.appendChild(thumbImg);
+        
+                    imagePair.onclick = () => {
+                        fullImg1.src = imgData.original;
+                        fullImg2.src = imgData.mask;
+                        lightbox.style.display = "flex";
+                    };
+                    
+                    row.appendChild(imagePair);
+                });
+                
+                imageContainer.appendChild(row);
+            }
+        }
+        
+        
+        lightbox.onclick = () => {
+            lightbox.style.display = "none";
+        };
+        
+        document.addEventListener("DOMContentLoaded", loadImages);
+        
+        // Lazy Loading
+        document.addEventListener("scroll", () => {
+            document.querySelectorAll(".lazy-load").forEach(img => {
+                if (img.getBoundingClientRect().top < window.innerHeight && !img.src) {
+                    img.src = img.dataset.src;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

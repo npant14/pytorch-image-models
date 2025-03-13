@@ -9,6 +9,7 @@ Hacked together by Ross Wightman (https://github.com/rwightman)
 """
 import argparse
 import csv
+import random
 import glob
 import json
 import logging
@@ -17,8 +18,12 @@ import time
 from collections import OrderedDict
 from contextlib import suppress
 from functools import partial
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
+import numpy as np
 
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.parallel
 
@@ -27,6 +32,9 @@ from timm.layers import apply_test_time_pool, set_fast_norm
 from timm.models import create_model, load_checkpoint, is_model, list_models
 from timm.utils import accuracy, AverageMeter, natural_key, setup_default_logging, set_jit_fuser, \
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
+
+from pad import *
+from brainscore_benchmark import Brainscore_Experiment
 
 try:
     from apex import amp
@@ -86,6 +94,10 @@ parser.add_argument('--img-size', default=None, type=int,
                     metavar='N', help='Input image dimension, uses model default if empty')
 parser.add_argument('--in-chans', type=int, default=None, metavar='N',
                     help='Image input channels (default: None => 3)')
+
+parser.add_argument('--image-scale', default=None, nargs=3, type=int,
+                    metavar='N N N', help='Input image scale before padding (d h w, e.g. --image-scale 3 224 224), uses model default if empty')
+
 parser.add_argument('--input-size', default=None, nargs=3, type=int,
                     metavar='N N N', help='Input all image dimensions (d h w, e.g. --input-size 3 224 224), uses model default if empty')
 parser.add_argument('--use-train-size', action='store_true', default=False,
@@ -161,6 +173,7 @@ parser.add_argument('--retry', default=False, action='store_true',
                     help='Enable batch size decay & retry for single model validation')
 
 
+
 def validate(args):
     # might as well try to validate something
     args.pretrained = args.pretrained or not args.checkpoint
@@ -204,6 +217,8 @@ def validate(args):
     elif args.input_size is not None:
         in_chans = args.input_size[0]
 
+    args.model_kwargs['channel_size'] = args.input_size[-1]
+
     model = create_model(
         args.model,
         pretrained=args.pretrained,
@@ -218,6 +233,7 @@ def validate(args):
         args.num_classes = model.num_classes
 
     if args.checkpoint:
+        
         load_checkpoint(model, args.checkpoint, args.use_ema)
 
     if args.reparam:
@@ -265,7 +281,7 @@ def validate(args):
     else:
         input_img_mode = args.input_img_mode
     dataset = create_dataset(
-        root=root_dir,
+        root=args.data_dir,
         name=args.dataset,
         split=args.split,
         download=args.dataset_download,
@@ -292,6 +308,7 @@ def validate(args):
     loader = create_loader(
         dataset,
         input_size=data_config['input_size'],
+        # input_size=args.image_scale, ##############make image smaller
         batch_size=args.batch_size,
         use_prefetcher=args.prefetcher,
         interpolation=data_config['interpolation'],
@@ -305,6 +322,37 @@ def validate(args):
         device=device,
         tf_preprocessing=args.tf_preprocessing,
     )
+    
+    target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
+    print("image size:", args.image_scale)
+
+    # take one image from the loader
+    sample_image, _ = next(iter(loader))
+
+    #####PADDING FOR VALIDATION################
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
+    loader = DataLoaderTransformWrapper(loader, transform)
+
+    visualize = False
+    if visualize == True:
+        scales = [160, 192, 227, 322, 382, 454]
+        visualize_transforms(sample_image, scales, target_size)
+        exit(0)
+    
+    # import numpy as np
+    # import matplotlib.pyplot as plt
+    
+    # images, _ = next(iter(loader))
+    # images = pad_batch(images, target_size)
+    
+    
+    # img = images[0]
+    # print(f"Image shape: {img.shape}")
+    # img_np = img.permute(1, 2, 0).cpu().numpy()
+    # img_np = np.clip(img_np, 0, 1)
+    # plt.imsave('sample_image.png', img_np)
+    # exit(0)
+
 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -312,6 +360,23 @@ def validate(args):
     top5 = AverageMeter()
 
     model.eval()
+
+    # do brain score evaluation
+    if args.model_kwargs['brainscore'] == True:
+        print("Running brainscore evaluation")
+        be = Brainscore_Experiment(model, "test_brainscore", device)
+        for compare in [0,1,2,3,4,5]:
+            be.rdm_corr_func(scale_test_list=[compare,2], save_rdms_list=
+                             ["module.layer1.1.conv2",
+                                            "module.layer2.0.conv2",
+                                            "module.layer2.1.conv2",
+                                            "module.layer3.0.conv2",
+                                            "module.layer3.1.conv2",
+                                            "module.layer4.0.conv2",
+                                            "module.layer4.1.conv2",
+                                            "module.fc"])
+
+    # do normal evaluation
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
@@ -322,6 +387,7 @@ def validate(args):
 
         end = time.time()
         for batch_idx, (input, target) in enumerate(loader):
+
             if args.no_prefetcher:
                 target = target.to(device)
                 input = input.to(device)
@@ -331,6 +397,9 @@ def validate(args):
             # compute output
             with amp_autocast():
                 output = model(input)
+
+                if isinstance(output, (tuple, list)):
+                    output = output[0]
 
                 if valid_labels is not None:
                     output = output[:, valid_labels]

@@ -4,10 +4,18 @@ Hacked together by / Copyright 2019, Ross Wightman
 """
 import io
 import logging
+import os
+import pandas as pd
+import numpy as np
+import sys
+
+
 from typing import Optional
 
 import torch
 import torch.utils.data as data
+from torch.utils.data import Dataset
+import torchvision.transforms as transforms
 from PIL import Image
 
 from .readers import create_reader
@@ -16,6 +24,139 @@ _logger = logging.getLogger(__name__)
 
 
 _ERROR_RETRY = 50
+
+
+
+def load_wordnet_to_numeric_mapping(txt_file_path: str) -> dict:
+    """
+    Reads a text file where each line contains a WordNet ID, a numeric value,
+    and a class name, separated by whitespace. Returns a dictionary mapping
+    each WordNet ID to the numeric value from the second column.
+
+    Example input file line:
+        n02119789 1 kit_fox
+
+    Args:
+        txt_file_path (str): Path to the text file.
+
+    Returns:
+        dict: A dictionary mapping from WordNet ID (str) to numeric value (int).
+    """
+    mapping = {}
+    with open(txt_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue  # Skip empty lines.
+            parts = line.split()
+            if len(parts) < 2:
+                continue  # Skip lines that don't have at least two tokens.
+            wordnet_id = parts[0]
+            try:
+                numeric_value = int(parts[1])
+            except ValueError:
+                # Skip this line or handle the error as needed.
+                continue
+            mapping[wordnet_id] = numeric_value
+    return mapping
+
+class ScaledImagenetDataset(Dataset):
+    def __init__(self, csv_file, root_dir,root=None, transform=None, crop_size=224):
+        """
+        Args:
+            csv_file (str): Path to CSV file containing metadata.
+            root_dir (str): Root directory containing all images.
+            transform (callable, optional): Transformations applied to samples.
+            crop_size (int): The final crop size used in the transformation (default 224).
+                             The image is first resized to a proportional size.
+                             (Default ratio: 256/224)
+        """
+        
+        self.data = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.transform = transform
+        self.crop_size = crop_size
+        # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
+        self.resize_size = int(round(crop_size * (256 / 224)))
+        self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
+        self.class_map = load_wordnet_to_numeric_mapping(self.class_path)
+        
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        # Extract row values using iloc and idx
+        wordnet_id = self.data.iloc[idx, 0]
+        image_id = self.data.iloc[idx, 1]
+        img_relative_path = self.data.iloc[idx, 2]
+        mask_path = self.data.iloc[idx, 3]
+        class_name = self.data.iloc[idx, 4]
+        scale_band = int(self.data.iloc[idx, 5])
+        relative_center_x = float(self.data.iloc[idx, 6])
+        relative_center_y = float(self.data.iloc[idx, 7])
+
+        # Construct full image path using root_dir
+        img_name = os.path.join(self.root_dir, img_relative_path)
+
+        # Verify file existence
+        if not os.path.exists(img_name):
+            raise FileNotFoundError(f"Image file does not exist: {img_name}")
+        if not os.path.exists(mask_path):
+            raise FileNotFoundError(f"Mask file does not exist: {mask_path}")
+
+        # Load image
+        image = Image.open(img_name).convert("RGB")
+
+        # Load mask
+        mask_data = np.load(mask_path)
+        mask = mask_data[mask_data.files[0]]
+
+        # Instead of assuming a fixed resize of 256x256, compute it from the crop_size.
+        # Here, we assume that the transformation pipeline first resizes the image to (resize_size, resize_size)
+        # and then applies a CenterCrop of (crop_size, crop_size).
+        resized_h, resized_w = self.resize_size, self.resize_size  # e.g., 256 when crop_size is 224
+        crop_h, crop_w = self.crop_size, self.crop_size           # e.g., 224
+
+        # Convert relative centers to actual pixel coordinates based on the resized image.
+        center_x = int(relative_center_x * resized_w)
+        center_y = int(relative_center_y * resized_h)
+
+        # Calculate the offset introduced by the CenterCrop.
+        offset_x = (resized_w - crop_w) // 2
+        offset_y = (resized_h - crop_h) // 2
+
+        # Calculate new center coordinates for the cropped image.
+        resized_center_x = center_x - offset_x
+        resized_center_y = center_y - offset_y
+
+        resized_center = torch.tensor([resized_center_x, resized_center_y], dtype=torch.float32)
+
+        # Apply transformations if provided.
+        if self.transform:
+            image = self.transform(image)
+            mask = Image.fromarray(mask).convert("L")
+            # Resize mask to match the image dimensions (assumed to be (crop_size, crop_size)).
+            mask = transforms.Resize((image.shape[1], image.shape[2]))(mask)
+            mask = torch.tensor(np.array(mask), dtype=torch.float32)
+            mask = torch.stack([mask] * 3, dim=0)
+
+        sample = {
+            'image': image,
+            'mask': mask,
+            'scale_band': scale_band,
+            'resized_center': resized_center,
+            'class_name': class_name,
+            'target': self.class_map[wordnet_id]    
+        }
+        
+        input = sample['image']#(sample['image'], sample['mask'], sample['scale_band'], sample['resized_center'])
+        # make input a tensor
+        
+        target = sample['target']
+        return input, target ,sample['scale_band']
 
 
 class ImageDataset(data.Dataset):
