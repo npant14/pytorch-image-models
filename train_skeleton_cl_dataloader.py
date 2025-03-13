@@ -604,8 +604,9 @@ def main():
         num_samples=args.train_num_samples,
     )
     loader_train = create_loader_scale(
-        csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/imagenet_centers.csv",
+        csv_file = "/oscar/scratch/vnema/foreground_proportions_with_rescaled_centers.csv",
         root_dir = "/gpfs/data/shared/imagenet/ILSVRC2012/train/", 
+        mask_look_up_json = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json",
         root = args.data_dir, 
         input_size=data_config['input_size'],
         batch_size=args.batch_size,

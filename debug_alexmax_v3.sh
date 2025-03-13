@@ -18,9 +18,9 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 scale_bands=7
 classifier_input_size=9216
-model=alexmax_v3_4
+model=alexmax_v3_3
 
-sh distributed_train.sh 1 train_skeleton.py \
+sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $model \
@@ -37,9 +37,10 @@ sh distributed_train.sh 1 train_skeleton.py \
     --decay-epochs 30 \
     --warmup-epochs 0 \
     --hflip 0.5\
+    --scale 1.0 1.0 \
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment debug3_resize2_{$model}_cl_1_ip_{$scale_bands}_322_{$classifier_input_size}\
+    --experiment debug3_noaug_resize2_{$model}_cl_1_ip_{$scale_bands}_322_{$classifier_input_size}\
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/\
     
  

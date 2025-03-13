@@ -11,15 +11,15 @@
 
 
 module load anaconda/2023.09-0-7nso27y
-module load python/3.9.16s-x3wdtvt
-module load cuda
+# module load python/3.9.16s-x3wdtvt
+# module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 scale_bands=7
 classifier_input_size=9216
-model=chalexmax_v3_3_optimized
-cl_lambda=0.5
+model=chalexmax_v3_3
+cl_lambda=1
 
 sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
@@ -38,9 +38,10 @@ sh distributed_train.sh 2 train_skeleton.py \
     --decay-epochs 30 \
     --warmup-epochs 0 \
     --hflip 0.5\
+    --scale 1.0 1.0 \
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment debug5_resize2_{$model}_cl_{$cl_lambda}_ip_{$scale_bands}_322_{$classifier_input_size}\
+    --experiment debug5_noaug_resize2_{$model}_cl_{$cl_lambda}_ip_{$scale_bands}_322_{$classifier_input_size}\
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/\
     
  
