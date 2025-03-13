@@ -19,7 +19,7 @@ conda activate env_default
 cd /users/xyu110/pytorch-image-models
 
 DATASET="torch/imagenet"
-MODEL="alexmax_v3"
+MODEL="resmax_v2"
 CLASSIFIER_INPUT_SIZE=9216
 CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
@@ -29,7 +29,7 @@ BATCH_SIZE=64
 # add for loop to run multiple scales
 for imgscale in 160
 do
-    for IP_BANDS in 5
+    for IP_BANDS in 3
     do
         sh distributed_val.sh $GPUS validate.py \
             --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
@@ -39,7 +39,7 @@ do
             --image-scale 3 $imgscale $imgscale \
             --input-size $INPUT_SIZE \
             --pretrained \
-            --checkpoint /cifs/data/tserre_lrs/projects/prj_hmax/models/resize2_alexmax_v3_cl_1_ip_${IP_BANDS}_322_${CLASSIFIER_INPUT_SIZE}/last.pth.tar \
+            --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_0_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]/model_best.pth.tar \
             --results-file /oscar/data/tserre/xyu110/pytorch-output/train/batch_size_128/${imgscale}_ip_${IP_BANDS}_${MODEL}_gpu_8_cl_0_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_].txt
         wait
     done

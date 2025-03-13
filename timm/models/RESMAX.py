@@ -683,7 +683,7 @@ class RESMAX_V2(nn.Module):
             global_scale_pool=False
         )
         
-        if self.bypass == True:
+        if self.bypass:
             self.s2b = S2b_Res()
             self.c2b_seq = nn.Sequential(
                 nn.MaxPool2d(kernel_size=3, stride=2),
@@ -694,7 +694,6 @@ class RESMAX_V2(nn.Module):
             )
 
         self.s3 = S3_Res()
-        # If ip_scale_bands > 4, use a multi-scale final C_scoring2_optimized
         if self.ip_scale_bands > 4:
             self.global_pool = C_scoring2_optimized(
                 num_channels=256,
@@ -706,10 +705,8 @@ class RESMAX_V2(nn.Module):
                 global_scale_pool=False
             )
         else:
-            # Else use a single-scale global pool
             self.global_pool = C(global_scale_pool=True)
-        
-        # Keep classifier layers the same
+
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(classifier_input_size, 4096),
@@ -744,59 +741,42 @@ class RESMAX_V2(nn.Module):
             return [x]
 
     def forward(self, x, pyramid=False):
-        """
-        x: [N, C, H, W]
-        pyramid (bool): if True, return c1[0], c2[0] for external usage
-        main_route (bool): if True, only build 2-scale pyramid; else ip_scale_bands scales
-        """
-        # Decide how many scales to build
         if self.main_route:
-            # 2 total scales => effectively 1 band
             out = self.make_ip(x, 2)
         else:
             out = self.make_ip(x, self.ip_scale_bands)
         
-        # S1
         out = self.s1(out)
-        # C1
         out_c1 = self.c1(out)
-        # S2
         out = self.s2(out_c1)
-        # C2
         out_c2 = self.c2(out)
         
         if self.bypass:
-        # s2b # input torch.Size([128, 96, 28, 28])
-            bypass = self.s2b(out_c1) # torch.Size([128, 1024, 28, 28])
-            bypass = self.c2b_seq(bypass[0]) # torch.Size([128, 256, 6, 6])
+            bypass = self.s2b(out_c1)
+            bypass = self.c2b_seq(bypass[0])
             bypass = bypass.reshape(bypass.size(0), -1)
-
-        # s3
+        
         out = self.s3(out_c2)
-        out = self.global_pool(out) # out shape: torch.Size([128, 256, 6, 6])
-
+        out = self.global_pool(out)
         if isinstance(out, list):
-            # If multi-scale, pick first
             out = out[0]
-
         out = out.reshape(out.size(0), -1)
 
-        # merge bypass and main path
         if self.bypass:
             out = torch.cat([out, bypass], dim=1)
-        # out += bypass
-
-        # fc layers
+        
         out = self.fc(out)
         out = self.fc1(out)
         out = self.fc2(out)
 
         if self.contrastive_loss:
-            # For contrastive usage, return (final out, c1[0], c2[0])
-            return out, out_c1[0], out_c2[0]
+            if self.bypass:
+                return out, out_c1[0], out_c2[0], bypass
+            else:
+                return out, out_c1[0], out_c2[0]
 
         return out
-    
+
 
 class CHRESMAX_V2(nn.Module):
     """
@@ -816,6 +796,7 @@ class CHRESMAX_V2(nn.Module):
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
         
         # Use the optimized backbone
         self.model_backbone = RESMAX_V2(
@@ -834,7 +815,11 @@ class CHRESMAX_V2(nn.Module):
             (output_of_stream1, correct_scale_loss)
         """
         # stream 1 (original scale)
-        stream_1_output, stream_1_c1_feats, stream_1_c2_feats = self.model_backbone(x)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
 
         # stream 2 (random scale)
         scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
@@ -852,13 +837,23 @@ class CHRESMAX_V2(nn.Module):
             x_rescaled = center_crop(x_rescaled)
 
         # forward pass on the scaled input
-        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
 
         # scale-consistency loss
         c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
         c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
         out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
-        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
 
         return stream_1_output, correct_scale_loss
     

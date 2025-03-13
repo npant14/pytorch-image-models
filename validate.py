@@ -34,6 +34,7 @@ from timm.utils import accuracy, AverageMeter, natural_key, setup_default_loggin
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
 
 from pad import *
+from brainscore_benchmark import Brainscore_Experiment
 
 try:
     from apex import amp
@@ -325,18 +326,17 @@ def validate(args):
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     print("image size:", args.image_scale)
 
+    # take one image from the loader
+    sample_image, _ = next(iter(loader))
+
     #####PADDING FOR VALIDATION################
-    transform = RandomResizePad(original_size=target_size, min_size=args.image_scale[1], max_size=args.image_scale[1])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
     loader = DataLoaderTransformWrapper(loader, transform)
 
     visualize = False
     if visualize == True:
-        visualize_dataloader_samples(
-            loader=loader,
-            target_size=target_size,
-            num_images=16,
-            save_path='dataloader_samples.png'
-        )
+        scales = [160, 192, 227, 322, 382, 454]
+        visualize_transforms(sample_image, scales, target_size)
         exit(0)
     
     # import numpy as np
@@ -360,6 +360,23 @@ def validate(args):
     top5 = AverageMeter()
 
     model.eval()
+
+    # do brain score evaluation
+    if args.model_kwargs['brainscore'] == True:
+        print("Running brainscore evaluation")
+        be = Brainscore_Experiment(model, "test_brainscore", device)
+        for compare in [0,1,2,3,4,5]:
+            be.rdm_corr_func(scale_test_list=[compare,2], save_rdms_list=
+                             ["module.layer1.1.conv2",
+                                            "module.layer2.0.conv2",
+                                            "module.layer2.1.conv2",
+                                            "module.layer3.0.conv2",
+                                            "module.layer3.1.conv2",
+                                            "module.layer4.0.conv2",
+                                            "module.layer4.1.conv2",
+                                            "module.fc"])
+
+    # do normal evaluation
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
