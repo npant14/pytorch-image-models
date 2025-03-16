@@ -1021,6 +1021,7 @@ def main():
         _logger.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
     print(f'--result\n{json.dumps(results, indent=4)}')
 
+import pdb
 
 def train_one_epoch(
         epoch,
@@ -1086,10 +1087,13 @@ def train_one_epoch(
 
         def _forward():
             # with amp_autocast():
+            scale_loss = 0
             try:
-                if model.module.contrastive_loss:
+                if model.contrastive_loss:
+                    # pdb.set_trace()
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+                    # print(scale_loss)
             # default normal model behavior
                 else: 
                     output = model(input)
@@ -1100,7 +1104,7 @@ def train_one_epoch(
 
             # if accum_steps > 1:
             #     loss /= accum_steps
-            return loss
+            return loss, scale_loss
 
         def _backward(_loss):
             # if loss_scaler is not None:
@@ -1130,7 +1134,7 @@ def train_one_epoch(
         #         _backward(loss)
         # else:
 
-        loss = _forward()
+        loss, scale_loss = _forward()
         _backward(loss)
 
         running_loss += loss.item()
@@ -1174,6 +1178,7 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
+                    f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
                     # f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
                     # f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
                     f'LR: {lr:.3e}  '

@@ -360,20 +360,6 @@ def validate(args):
 
     model.eval()
 
-    # do brain score evaluation
-    if args.model_kwargs['brainscore'] == True:
-        print("Running brainscore evaluation")
-        be = Brainscore_Experiment(model, "test_brainscore", device)
-        for compare in [0,1,2,3,4,5]:
-            be.rdm_corr_func(scale_test_list=[compare,2], save_rdms_list=
-                             ["module.layer1.1.conv2",
-                                            "module.layer2.0.conv2",
-                                            "module.layer2.1.conv2",
-                                            "module.layer3.0.conv2",
-                                            "module.layer3.1.conv2",
-                                            "module.layer4.0.conv2",
-                                            "module.layer4.1.conv2",
-                                            "module.fc"])
 
     # do normal evaluation
     with torch.no_grad():
@@ -441,12 +427,17 @@ def validate(args):
         top1a, top5a = top1.avg, top5.avg
     results = OrderedDict(
         model=args.model,
+        ip_band=args.model_kwargs['ip_scale_bands'],
+        classifier_input_size=args.model_kwargs['classifier_input_size'],
+        bypass=args.model_kwargs['bypass'],
+        cl=args.model_kwargs['cl'],
+        scale_invariance=args.image_scale[1],
+        model_scale=data_config['input_size'][-1],
         top1=round(top1a, 4), top1_err=round(100 - top1a, 4),
         top5=round(top5a, 4), top5_err=round(100 - top5a, 4),
         param_count=round(param_count / 1e6, 2),
-        img_size=data_config['input_size'][-1],
-        crop_pct=crop_pct,
-        interpolation=data_config['interpolation'],
+        # crop_pct=crop_pct,
+        # interpolation=data_config['interpolation'],
     )
 
     _logger.info(' * Acc@1 {:.3f} ({:.3f}) Acc@5 {:.3f} ({:.3f})'.format(
@@ -545,19 +536,79 @@ def main():
 
 
 def write_results(results_file, results, format='csv'):
-    with open(results_file, mode='w') as cf:
+    # Check if the file exists to determine mode ('a' for append, 'w' for new file)
+    file_exists = os.path.isfile(results_file)
+    
+    with open(results_file, mode='a' if file_exists else 'w') as cf:
         if format == 'json':
-            json.dump(results, cf, indent=4)
-        else:
+            # For JSON, we need to handle appending differently
+            if file_exists:
+                # If file exists but is empty, write as new
+                if os.path.getsize(results_file) == 0:
+                    json.dump(results, cf, indent=4)
+                else:
+                    # Need to read existing JSON, append new results, and write back
+                    cf.close()  # Close file first
+                    with open(results_file, 'r') as rf:
+                        try:
+                            existing_data = json.load(rf)
+                        except json.JSONDecodeError:
+                            # If not valid JSON, start fresh
+                            existing_data = []
+                    
+                    # Handle different data structures
+                    if isinstance(existing_data, list):
+                        if isinstance(results, list):
+                            existing_data.extend(results)
+                        else:
+                            existing_data.append(results)
+                    elif isinstance(existing_data, dict) and isinstance(results, dict):
+                        existing_data.update(results)
+                    else:
+                        # If incompatible types, create an array of both
+                        existing_data = [existing_data, results]
+                    
+                    # Write back the combined data
+                    with open(results_file, 'w') as wf:
+                        json.dump(existing_data, wf, indent=4)
+            else:
+                # New file
+                json.dump(results, cf, indent=4)
+        else:  # CSV
             if not isinstance(results, (list, tuple)):
                 results = [results]
             if not results:
                 return
-            dw = csv.DictWriter(cf, fieldnames=results[0].keys())
-            dw.writeheader()
-            for r in results:
-                dw.writerow(r)
+                
+            if file_exists and os.path.getsize(results_file) > 0:
+                # File exists and has content, only write data without header
+                dw = csv.DictWriter(cf, fieldnames=results[0].keys())
+                for r in results:
+                    dw.writerow(r)
+            else:
+                # New file or empty file, write header and data
+                dw = csv.DictWriter(cf, fieldnames=results[0].keys())
+                dw.writeheader()
+                for r in results:
+                    dw.writerow(r)
+            
             cf.flush()
+
+
+# def write_results(results_file, results, format='csv'):
+#     with open(results_file, mode='w') as cf:
+#         if format == 'json':
+#             json.dump(results, cf, indent=4)
+#         else:
+#             if not isinstance(results, (list, tuple)):
+#                 results = [results]
+#             if not results:
+#                 return
+#             dw = csv.DictWriter(cf, fieldnames=results[0].keys())
+#             dw.writeheader()
+#             for r in results:
+#                 dw.writerow(r)
+#             cf.flush()
 
 
 
