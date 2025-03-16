@@ -11,9 +11,16 @@
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
-module load miniconda3/23.11.0s
-source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-conda activate env_default
+# Check if modules are loaded
+if ml 2>&1 | grep -q "No modules loaded"; then
+    module load miniconda3/23.11.0s
+    source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
+    conda activate env_default
+else
+    echo "Modules already loaded, skipping conda activation"
+fi
+
+which python
 
 cd /users/xyu110/pytorch-image-models
 
@@ -32,7 +39,20 @@ BATCH_SIZE=BATCH_SIZE_VALUE
 BYPASS=BYPASS_VALUE
 BYPASS_STR=BYPASS_STR_VALUE
 
-EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}"
+BASE_EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}"
+EXPERIMENT_NAME="${BASE_EXPERIMENT_NAME}"
+
+# Check if directory exists and append suffix if needed
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train"
+SUFFIX_COUNT=1
+
+while [ -d "${OUTPUT_DIR}/${EXPERIMENT_NAME}" ]; do
+    echo "Directory ${OUTPUT_DIR}/${EXPERIMENT_NAME} already exists, trying with suffix"
+    EXPERIMENT_NAME="${BASE_EXPERIMENT_NAME}_${SUFFIX_COUNT}"
+    SUFFIX_COUNT=$((SUFFIX_COUNT + 1))
+done
+
+echo "Using experiment name: ${EXPERIMENT_NAME}"
 
 sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
@@ -43,7 +63,7 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --opt sgd \
     -b $BATCH_SIZE \
     --epochs 90 \
-    --lr 1e-2 \
+    --lr 1e-4 \
     --weight-decay 5e-4 \
     --sched step \
     --momentum 0.9 \
@@ -56,4 +76,3 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
     --output /oscar/data/tserre/xyu110/pytorch-output/train/
-    

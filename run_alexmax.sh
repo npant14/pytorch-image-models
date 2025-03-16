@@ -4,10 +4,10 @@
 #SBATCH -n 8
 #SBATCH -N 1
 #SBATCH --mem=60GB
-#SBATCH -o chresmax_v2_ip3_wobypass.out
-#SBATCH -e chresmax_v2_ip3_wobypass.err
+#SBATCH -o chresmax_v2_ip3_cl1.out
+#SBATCH -e chresmax_v2_ip3_cl1.err
 #SBATCH --account=carney-tserre-condo
-#SBATCH -J chresmax_v2_ip3_wobypass
+#SBATCH -J chresmax_v2_ip3_cl1
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -26,11 +26,11 @@ DATASET="torch/imagenet"
 # MODEL="resmax_v2"
 MODEL="chresmax_v2"
 CLASSIFIER_INPUT_SIZE=9216
-CL_LAMBDA=0
+CL_LAMBDA=1
 INPUT_SIZE="3 322 322"
 GPUS=8
 IP_BANDS=3
-BATCH_SIZE=32
+BATCH_SIZE=64
 EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]"
 # EXPERIMENT_NAME="test"
 
@@ -55,3 +55,4 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
     --output /oscar/data/tserre/xyu110/pytorch-output/train/ \
+    # --add-wrapped-schedulefree \

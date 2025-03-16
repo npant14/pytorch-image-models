@@ -32,22 +32,18 @@ IMAGE_SCALE="IMAGE_SCALE_VALUE"
 RESULTS_DIR="RESULTS_DIR_VALUE"
 
 mkdir -p $RESULTS_DIR
-OUTPUT_FILE_NAME=${RESULTS_DIR}/${IMAGE_SCALE}_ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}.txt
 
-# if resultfile exists, exit
-# if [ -f $OUTPUT_FILE_NAME ]; then
-#     echo "Result file ${OUTPUT_FILE_NAME} exists, exiting"
-#     exit 0
-# fi
+# MODEL_PTH_USED="model_best"
+MODEL_PTH_USED="last"
 
 # Run validation for specified parameters
 sh distributed_val.sh $GPUS validate.py \
     --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
     --model $MODEL \
     -b $BATCH_SIZE \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS brainscore=False\
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA\
     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
     --input-size $INPUT_SIZE \
     --pretrained \
-    --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/recent_results/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]/model_best.pth.tar \
-    --results-file $OUTPUT_FILE_NAME
+    --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]/${MODEL_PTH_USED}.pth.tar \
+    --results-file ${RESULTS_DIR}/validation_output_${MODEL_PTH_USED}.csv
