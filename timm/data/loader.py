@@ -126,18 +126,19 @@ class PrefetchLoaderScale:
             stream = None
             stream_context = suppress
 
-        for next_input, next_target,next_scale in self.loader:
-
+        for next_input, next_target,next_scale, next_center in self.loader:
+            
             with stream_context():
                 next_input = next_input.to(device=self.device, non_blocking=True)
                 next_target = next_target.to(device=self.device, non_blocking=True)
                 next_scale = next_scale.to(device=self.device, non_blocking=True)
+                next_center = next_center.to(device=self.device, non_blocking=True)
                 next_input = next_input.to(self.img_dtype).sub_(self.mean).div_(self.std)
                 if self.random_erasing is not None:
                     next_input = self.random_erasing(next_input)
 
             if not first:
-                yield input, target, scale 
+                yield input, target, scale, center
             else:
                 first = False
 
@@ -147,8 +148,9 @@ class PrefetchLoaderScale:
             input = next_input
             target = next_target
             scale = next_scale
+            center = next_center
 
-        yield input, target,scale
+        yield input, target, scale, center
 
     def __len__(self):
         return len(self.loader)
@@ -290,7 +292,8 @@ def _worker_init(worker_id, worker_seeding='all'):
 def create_loader_scale(
         csv_file: str,
         root_dir: str,
-        root :str, 
+        mask_look_up_json: str,
+        root: str, 
         input_size: Union[int, Tuple[int, int], Tuple[int, int, int]],
         batch_size: int,
         is_training: bool = False,
@@ -345,7 +348,7 @@ def create_loader_scale(
     """
 
     # Instantiate your custom dataset.
-    dataset = ScaledImagenetDataset(csv_file, root_dir,root=root, transform=None, crop_size=crop_size)
+    dataset = ScaledImagenetDataset(csv_file, root_dir,mask_look_up_json,root=root, transform=None, crop_size=crop_size)
 
     # Compute the resize size to preserve the ratio (e.g. 224->256)
     resize_size = int(round(crop_size * (256 / 224)))

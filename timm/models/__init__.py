@@ -84,6 +84,8 @@ from .RESMAX import *
 from .RESMAX_Inception import *
 from .ALEXMAX3 import *
 from .ALEXMAX3_optimized import *
+from .ALEXMAX3_dl import *
+from .cornet import *   
 
 from ._builder import build_model_with_cfg, load_pretrained, load_custom_pretrained, resolve_pretrained_cfg, \
     set_pretrained_download_progress, set_pretrained_check_hash

@@ -8,23 +8,23 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
+import multiprocessing
+
+# At the top of the file, after imports
+if not multiprocessing.get_start_method(allow_none=True):
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass
 
 # Load WordNet ID to Class Label Mapping from text file
-wordnet_to_label_txt = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
+wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
 wordnet_to_label = {}
 with open(wordnet_to_label_txt, 'r') as f:
     for line in f:
         parts = line.strip().split()
         if len(parts) > 1:
-            wordnet_to_label[parts[0]] = " ".join(parts[1:])
-
-import os
-import pandas as pd
-import numpy as np
-import torch
-from torch.utils.data import Dataset
-from PIL import Image
-import torchvision.transforms as transforms
+            wordnet_to_label[parts[0]] = int(parts[1])-1
 
 class ScaledImagenetDataset(Dataset):
     def __init__(self, csv_file, root_dir, mask_lookup_json, transform=None):
@@ -40,6 +40,7 @@ class ScaledImagenetDataset(Dataset):
 
     def __getitem__(self, idx):
         img_file = self.data.iloc[idx, 0]  # Image File
+        
         scale_band = int(self.data.iloc[idx, 9])  # Scale Band
         center_x = float(self.data.iloc[idx, 7])  # Cropped center X
         center_y = float(self.data.iloc[idx, 8])  # Cropped center Y
@@ -73,7 +74,6 @@ class ScaledImagenetDataset(Dataset):
             'center': center,
             'class_label': class_label
         }
-        
         return sample
 
 def show_batch(sample_batched, save_path=None):
@@ -114,9 +114,9 @@ transform_pipeline = transforms.Compose([
     transforms.ToTensor()
 ])
 
-csv_file = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
+csv_file = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
 root_dir = "/gpfs/data/tserre/npant1/ILSVRC/train"
-mask_lookup_json = "/cifs/data/tserre_lrs/projects/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
+mask_lookup_json = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
 
 dataset = ScaledImagenetDataset(
     csv_file=csv_file,
@@ -124,13 +124,44 @@ dataset = ScaledImagenetDataset(
     mask_lookup_json=mask_lookup_json,
     transform=transform_pipeline
 )
-
-dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2)
+import torch.nn as nn
+bsize = 128
+dataloader = DataLoader(
+    dataset, 
+    batch_size=bsize, 
+    shuffle=True, 
+    num_workers=4,
+    multiprocessing_context='spawn' if torch.cuda.is_available() else None
+)
 
 for i_batch, sample_batched in enumerate(dataloader):
-    if i_batch == 0:
-        output_dir = "/users/irodri15/data/irodri15/Hmax/pytorch-image-models/"
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
-        show_batch(sample_batched, save_path=save_path)
-        break
+    
+    scale_band = sample_batched['scale_band']
+    scale_band = 10 - scale_band  # so it's 0-based
+    scale_band = torch.tensor(scale_band)
+    print(scale_band)
+    labels = torch.tensor(sample_batched['class_label'])
+    #dummy scale_logits
+    scale_logits = torch.randn(bsize, 11)
+    # dummy logits 1000 classes 
+    logits = torch.randn(bsize, 1000)
+
+    # apply cross entropy loss
+    
+    loss_fn = nn.CrossEntropyLoss()
+    loss = loss_fn(scale_logits, scale_band)
+    print(i_batch, loss)
+    loss_fn = nn.CrossEntropyLoss()
+    loss = loss_fn(logits, labels)
+    print(i_batch, loss)
+    # except Exception as e:
+    #     print(f"Error in batch {i_batch}: {e}")
+    #     import pdb; pdb.set_trace()
+    
+    # if i_batch == 0:
+    #     output_dir = "/users/irodri15/data/irodri15/Hmax/pytorch-image-models/"
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
+    #     show_batch(sample_batched, save_path=save_path)
+    #     break
+

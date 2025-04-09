@@ -8,7 +8,7 @@ import os
 import pandas as pd
 import numpy as np
 import sys
-
+import json
 
 from typing import Optional
 
@@ -60,8 +60,18 @@ def load_wordnet_to_numeric_mapping(txt_file_path: str) -> dict:
             mapping[wordnet_id] = numeric_value
     return mapping
 
+# Load WordNet ID to Class Label Mapping from text file
+wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
+wordnet_to_label = {}
+with open(wordnet_to_label_txt, 'r') as f:
+    for line in f:
+        parts = line.strip().split()
+        if len(parts) > 1:
+            wordnet_to_label[parts[0]] = int(parts[1])-1
+
+
 class ScaledImagenetDataset(Dataset):
-    def __init__(self, csv_file, root_dir,root=None, transform=None, crop_size=224):
+    def __init__(self, csv_file, root_dir, mask_lookup_json,root=None, transform=None, crop_size=224):
         """
         Args:
             csv_file (str): Path to CSV file containing metadata.
@@ -76,6 +86,8 @@ class ScaledImagenetDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.crop_size = crop_size
+        with open(mask_lookup_json, 'r') as f:
+            self.mask_lookup = json.load(f)
         # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
         self.resize_size = int(round(crop_size * (256 / 224)))
         self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
@@ -88,75 +100,52 @@ class ScaledImagenetDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        # Extract row values using iloc and idx
-        wordnet_id = self.data.iloc[idx, 0]
-        image_id = self.data.iloc[idx, 1]
-        img_relative_path = self.data.iloc[idx, 2]
-        mask_path = self.data.iloc[idx, 3]
-        class_name = self.data.iloc[idx, 4]
-        scale_band = int(self.data.iloc[idx, 5])
-        relative_center_x = float(self.data.iloc[idx, 6])
-        relative_center_y = float(self.data.iloc[idx, 7])
-
-        # Construct full image path using root_dir
-        img_name = os.path.join(self.root_dir, img_relative_path)
-
-        # Verify file existence
-        if not os.path.exists(img_name):
-            raise FileNotFoundError(f"Image file does not exist: {img_name}")
-        if not os.path.exists(mask_path):
-            raise FileNotFoundError(f"Mask file does not exist: {mask_path}")
-
-        # Load image
-        image = Image.open(img_name).convert("RGB")
-
-        # Load mask
+        img_file = self.data.iloc[idx, 0]  # Image File
+        scale_band = int(self.data.iloc[idx, 9])  # Scale Band
+        center_x = float(self.data.iloc[idx, 7])  # Cropped center X
+        center_y = float(self.data.iloc[idx, 8])  # Cropped center Y
+        
+        if img_file not in self.mask_lookup:
+            raise FileNotFoundError(f"Image file {img_file} not found in mask lookup JSON.")
+        
+        img_path = self.mask_lookup[img_file]["image_path"]
+        mask_path = self.mask_lookup[img_file]["mask_path"]
+        
+        wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
+        class_label = wordnet_to_label.get(wordnet_id, "Unknown")
+        #ignore unknown
+        # if class_label == "Unknown":
+        #     return self.__getitem__(idx + 1)
+        # if class_label == 1000:
+        #     return self.__getitem__(idx + 1)
+        
+        image = Image.open(img_path).convert("RGB")
         mask_data = np.load(mask_path)
         mask = mask_data[mask_data.files[0]]
 
-        # Instead of assuming a fixed resize of 256x256, compute it from the crop_size.
-        # Here, we assume that the transformation pipeline first resizes the image to (resize_size, resize_size)
-        # and then applies a CenterCrop of (crop_size, crop_size).
-        resized_h, resized_w = self.resize_size, self.resize_size  # e.g., 256 when crop_size is 224
-        crop_h, crop_w = self.crop_size, self.crop_size           # e.g., 224
-
-        # Convert relative centers to actual pixel coordinates based on the resized image.
-        center_x = int(relative_center_x * resized_w)
-        center_y = int(relative_center_y * resized_h)
-
-        # Calculate the offset introduced by the CenterCrop.
-        offset_x = (resized_w - crop_w) // 2
-        offset_y = (resized_h - crop_h) // 2
-
-        # Calculate new center coordinates for the cropped image.
-        resized_center_x = center_x - offset_x
-        resized_center_y = center_y - offset_y
-
-        resized_center = torch.tensor([resized_center_x, resized_center_y], dtype=torch.float32)
-
-        # Apply transformations if provided.
         if self.transform:
             image = self.transform(image)
             mask = Image.fromarray(mask).convert("L")
-            # Resize mask to match the image dimensions (assumed to be (crop_size, crop_size)).
-            mask = transforms.Resize((image.shape[1], image.shape[2]))(mask)
+            mask = transforms.Resize((322, 322))(mask)
             mask = torch.tensor(np.array(mask), dtype=torch.float32)
             mask = torch.stack([mask] * 3, dim=0)
-
+        
+        center = torch.tensor([center_x, center_y], dtype=torch.float32)
+        
         sample = {
             'image': image,
             'mask': mask,
             'scale_band': scale_band,
-            'resized_center': resized_center,
-            'class_name': class_name,
-            'target': self.class_map[wordnet_id]    
+            'center': center,
+            'target': class_label
         }
         
         input = sample['image']#(sample['image'], sample['mask'], sample['scale_band'], sample['resized_center'])
         # make input a tensor
         
         target = sample['target']
-        return input, target ,sample['scale_band']
+        
+        return input, target ,sample['scale_band'],sample['center']
 
 
 class ImageDataset(data.Dataset):

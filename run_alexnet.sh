@@ -16,10 +16,10 @@ module load cuda
 
 source activate /users/npant1/anaconda3/envs/hmax
 
-sh distributed_train.sh 1 train_skeleton.py \
+sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
-    --model alexnet \
+    --model cornet_s \
     --opt sgd \
     -b 128 \
     --epochs 90 \
@@ -33,8 +33,9 @@ sh distributed_train.sh 1 train_skeleton.py \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 227 227\
-    --experiment alexnet_debug \
-    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/ \
+     --scale 1.0 1.0 \
+    --experiment cornet_s_debug \
+    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/ \
 
 # sh distributed_train.sh 8 validate.py \
 #     --epochs 1 \
