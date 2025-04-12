@@ -60,8 +60,13 @@ def load_wordnet_to_numeric_mapping(txt_file_path: str) -> dict:
             mapping[wordnet_id] = numeric_value
     return mapping
 
+# Get the directory of the current script
+current_dir = os.path.dirname(__file__)
+wordnet_to_label_txt = os.path.join(current_dir, '_info', 'wordnetids_to_labels.txt')
 # Load WordNet ID to Class Label Mapping from text file
-wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
+#wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
+#if not os.path.exists(wordnet_to_label_txt):
+#    wordnet_to_label_txt =  '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/wordnetids_to_labels.txt'
 wordnet_to_label = {}
 with open(wordnet_to_label_txt, 'r') as f:
     for line in f:
@@ -114,10 +119,12 @@ class ScaledImagenetDataset(Dataset):
         wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
         class_label = wordnet_to_label.get(wordnet_id, "Unknown")
         #ignore unknown
-        # if class_label == "Unknown":
-        #     return self.__getitem__(idx + 1)
-        # if class_label == 1000:
-        #     return self.__getitem__(idx + 1)
+        if class_label == "Unknown":
+            return self.__getitem__(idx + 1)
+        if class_label == 1000:
+            return self.__getitem__(idx + 1)
+        if not os.path.exists(img_path):
+            img_path = img_path.replace("/gpfs/data/tserre/npant1/ILSVRC/","/oscar/data/tserre/npant1/ILSVRC/")
         
         image = Image.open(img_path).convert("RGB")
         mask_data = np.load(mask_path)

@@ -12,6 +12,7 @@ Command-line arguments remain largely the same, except references to teacher/stu
 Author: ChatGPT
 """
 print(f"Starting script")
+
 import argparse
 import importlib
 import json
@@ -36,21 +37,7 @@ try:
     torch.multiprocessing.set_start_method('spawn')
 except:
     pass
-print(f"Importing timm")
-from timm import utils
-print(f"Importing timm.data")
-from timm.data import create_dataset, create_loader, resolve_data_config, AugMixDataset, create_loader_scale
-print(f"Importing timm.layers")
-from timm.layers import convert_sync_batchnorm, set_fast_norm
-print(f"Importing timm.models")
-from timm.models import create_model, safe_model_name, resume_checkpoint, model_parameters
-print(f"Importing timm.optim")
-from timm.optim import create_optimizer_v2, optimizer_kwargs
-print(f"Importing timm.scheduler")
-from timm.scheduler import create_scheduler_v2, scheduler_kwargs
-print(f"Importing timm.utils")
-from timm.utils import ApexScaler, NativeScaler
-print(f"Importing apex")
+
 try:
     from apex import amp
     from apex.parallel import DistributedDataParallel as ApexDDP
@@ -58,7 +45,15 @@ try:
     has_apex = True
 except ImportError:
     has_apex = False
-
+print(f"Importing timm")
+from timm import utils
+from timm.data import create_dataset, create_loader, resolve_data_config, AugMixDataset, create_loader_scale
+from timm.layers import convert_sync_batchnorm, set_fast_norm
+from timm.models import create_model, safe_model_name, resume_checkpoint, model_parameters
+from timm.optim import create_optimizer_v2, optimizer_kwargs
+from timm.scheduler import create_scheduler_v2, scheduler_kwargs
+from timm.utils import ApexScaler, NativeScaler
+print(f"Importing timm done")
 has_native_amp = False
 try:
     if getattr(torch.cuda.amp, 'autocast') is not None:
@@ -79,10 +74,13 @@ except ImportError as e:
     has_functorch = False
 
 CSV_FILE= "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
-ROOT_DIR = "/gpfs/data/tserre/npant1/ILSVRC/train"
+ROOT_DIR = "/oscar/data/tserre/npant1/ILSVRC/train"
 MASK_LOOKUP_JSON = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
-print(f"CSV_FILE: {CSV_FILE}")
-print(f"MASK_LOOKUP_JSON: {MASK_LOOKUP_JSON}")  
+
+if not os.path.exists(CSV_FILE):
+    CSV_FILE = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/foreground_proportions_with_rescaled_centers.csv'
+if not os.path.exists(MASK_LOOKUP_JSON):
+    MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 
 torch.autograd.set_detect_anomaly(True)
 has_compile = hasattr(torch, 'compile')
@@ -320,74 +318,159 @@ def train_one_epoch(
         alpha = 0.1,
         device=torch.device('cuda'),
         lr_scheduler=None,
+        output_dir=None,
+        loss_scaler=None,
+        model_ema=None,
+        mixup_fn=None,
+        num_updates_total=None,
 ):
-    model = model.to(device)
-    model.train()
+    
     print(f"Model created")
-    
-    losses_m = utils.AverageMeter()
-    scale_losses_m = utils.AverageMeter()  # if you have a scale-related loss
-    batch_time_m = utils.AverageMeter()
+    running_loss = 0.
+    last_loss = 0.
 
-    end = time.time()
     
+    second_order = False
+    update_time_m = utils.AverageMeter()
+    data_time_m = utils.AverageMeter()
+    losses_m = utils.AverageMeter()
+    scale_selection_losses_m = utils.AverageMeter()
+    scale_losses_m = utils.AverageMeter()
+    model.train()
+    
+
+    accum_steps = 1 #args.grad_accum_steps
+    updates_per_epoch = (len(loader) + accum_steps - 1) // accum_steps
+    num_updates = epoch * updates_per_epoch
+    last_batch_idx = len(loader) - 1
+
+    data_start_time = update_start_time = time.time()
+    optimizer.zero_grad()
+    update_sample_count = 0
     for batch_idx, (input, target, scale_band, center) in enumerate(loader):
-       
+        
+        
         input = input.to(device)
         target = target.to(device)
         scale_band = scale_band.to(device)
+        scale_band = 10 - scale_band  # So larger scale_band is smaller loss
         center = center.to(device)
-        # forward: your model returns (class_logits, scale_logits) 
-        # or something similar
-        # If your model only returns class_logits, adapt accordingly.
-        output, scale_logits = model(input, center=center)
-       
-        # apply softmax to output
-        output = F.softmax(output, dim=1)
-        #apply softmax to scale_logits
-        scale_logits = F.softmax(scale_logits, dim=1)
         
-        # main CE loss
-        
-        try:
-            main_loss = loss_fn(output, target)
-        except:
-            import pdb; pdb.set_trace()
-        
-        scale_band = 10 - scale_band  # so it's 0-based
-        
-        # Standard cross entropy
-        scale_loss = F.cross_entropy(scale_logits, scale_band)  # => scalar loss
-        
-        # optional scale loss, if you have scale supervision or a certain reg
-        # For example, you can do an entropy penalty on scale_logits 
-        # scale_ent_loss = (scale_logits.log_softmax(dim=1)* scale_logits.softmax(dim=1)).sum(dim=1).mean() * -0.01
-        
+        last_batch = batch_idx == last_batch_idx
+        need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
+        update_idx = batch_idx // accum_steps   
 
-        total_loss = main_loss + alpha*scale_loss 
+        def _forward():
+            scale_loss = 0
+            scale_selection_loss = 0
+            try:
+                
+                if model.module.contrastive_loss:
+                    output, scale_logits, scale_loss= model(input)
+                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (alpha*scale_selection_loss) + (args.cl_lambda*scale_loss)
+                else:
+                    output, scale_logits = model(input)
+                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (alpha*scale_selection_loss)
+            except Exception as e:
+                if model.contrastive_loss:
+                    output, scale_logits, scale_loss= model(input)
+                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (alpha*scale_selection_loss) + (args.cl_lambda*scale_loss)
+                else:
+                    output, scale_logits  = model(input)
+                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (alpha*scale_selection_loss)
+                    
+            return loss, scale_selection_loss, scale_loss
+
+        def _backward(_loss):
+            if loss_scaler is not None:
+                loss_scaler(
+                    _loss,
+                    optimizer,  
+                    clip_grad=args.clip_grad,
+                    clip_mode=args.clip_mode,
+                    parameters=model_parameters(model, exclude_head='agc' in args.clip_mode),
+                    create_graph=second_order,
+                    need_update=need_update,
+                )
+            else:
+                _loss.backward(create_graph=second_order)
+                if need_update:
+                    if args.clip_grad is not None:
+                        utils.dispatch_clip_grad(
+                            model_parameters(model, exclude_head='agc' in args.clip_mode),
+                            value=args.clip_grad,
+                            mode=args.clip_mode,
+                        )
+                    optimizer.step()
+
+        loss, scale_selection_loss, scale_loss = _forward()
+        _backward(loss)
+
+        running_loss += loss.item()
+        if batch_idx % 50 == 49:
+            last_loss = running_loss / 50
+            running_loss = 0.
+
+        if not args.distributed:
+            losses_m.update(loss.item() * accum_steps, input.size(0))
+            scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
+            scale_losses_m.update(scale_loss * accum_steps, input.size(0))
+        update_sample_count += input.size(0)
+
+        if not need_update:
+            data_start_time = time.time()
+            continue
 
         optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
 
-        losses_m.update(total_loss.item(), input.size(0))
-        scale_losses_m.update(scale_loss if isinstance(scale_loss, float) else scale_loss.item(), input.size(0))
+        num_updates += 1
+        if model_ema is not None:
+            model_ema.update(model, step=num_updates)
+            
+        if args.synchronize_step and device.type == 'cuda':
+            torch.cuda.synchronize()
+        # time_now = time.time()
+        # update_time_m.update(time.time() - update_start_time)
+        # update_start_time = time_now
 
-        batch_time_m.update(time.time() - end)
-        end = time.time()
-
-        if utils.is_primary(args) and batch_idx % args.log_interval == 0:
+        if update_idx % args.log_interval == 0:
+            #if args.add_wrapped_schedulefree:
+            #    lr = optimizer.defaults['lr']  # Get learning rate from ScheduleFree
+            #else:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
-            _logger.info(
-                f'Train Epoch: {epoch} [{batch_idx}/{len(loader)}]  '
-                f'Loss: {losses_m.val:.4f} ({losses_m.avg:.4f})  '
-                f'ScaleLoss: {scale_losses_m.val:.4f} ({scale_losses_m.avg:.4f})  '
-                f'LR: {lr:.3e}  '
-                f'Time: {batch_time_m.val:.3f}s'
-            )
+
+            if args.distributed:
+                reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
+                losses_m.update(reduced_loss.item() * accum_steps, input.size(0))   
+                scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
+                scale_losses_m.update(scale_loss.item() * accum_steps, input.size(0))   
+                update_sample_count *= args.world_size
+            if utils.is_primary(args):
+                _logger.info(
+                    f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
+                    f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
+                    f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
+                    f'Scale Selection Loss: {scale_selection_losses_m.val:#.3g} ({scale_selection_losses_m.avg:#.3g})  '
+                    f'Scale Loss: {scale_losses_m.val:#.3g} ({scale_losses_m.avg:#.3g})  '
+                    #f'Time: {update_time_m.val:.3f}s ',
+                    #f'({update_time_m.avg:.3f}s)  ',
+                    f'LR: {lr:.3e}  '
+                    f'Data: {data_time_m.val:.3f} ({data_time_m.avg:.3f})'
+                )
+
+        if lr_scheduler is not None:
+            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
+
+        update_sample_count = 0
+        data_start_time = time.time()    
     return OrderedDict([
         ('total_loss', losses_m.avg),
+        ('scale_selection_loss', scale_selection_losses_m.avg),
         ('scale_loss', scale_losses_m.avg),
     ])
 
@@ -494,11 +577,12 @@ def main():
         **factory_kwargs,
         **args.model_kwargs,
     )
+    model = model.to(device)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     _logger.info(f"Model created, param count:{num_params}")
     if args.grad_checkpointing and hasattr(model, 'set_grad_checkpointing'):
         model.set_grad_checkpointing(enable=True)
-
+   
     data_config = resolve_data_config(vars(args), model=model, verbose=utils.is_primary(args))
     if args.data and not args.data_dir:
         args.data_dir = args.data
@@ -624,7 +708,9 @@ def main():
             f.write(args_text)
 
     results = []
-    try:
+    #try:
+    
+    if True:
         for epoch in range(start_epoch, num_epochs):
             if hasattr(dataset_train, 'set_epoch'):
                 dataset_train.set_epoch(epoch)
@@ -678,8 +764,10 @@ def main():
                 'validation': eval_metrics,
             })
 
-    except KeyboardInterrupt:
-        pass
+    # except KeyboardInterrupt:
+    #     print("KeyboardInterrupt")
+        
+    #     pass
 
     results = {'all': results}
     if best_metric is not None and best_epoch is not None:
@@ -688,4 +776,5 @@ def main():
     print(f'--result\n{json.dumps(results, indent=4)}')
 
 if __name__ == '__main__':
+    print('before main')
     main()
