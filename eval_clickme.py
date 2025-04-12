@@ -79,7 +79,7 @@ def prepare_clickme_dataset():
 # -- MAIN --
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on ClickMe using torch_explainer.")
-    parser.add_argument('--model', type=str, required=True, choices=["CHALEXMAX", "RESMAX", "RESNET", "ALEXNET"],
+    parser.add_argument('--model', type=str, required=True, choices=["CHALEXMAX", "RESMAX", "RESNET50", "ALEXNET"],
                         help="Model to evaluate")
     args = parser.parse_args()
 
