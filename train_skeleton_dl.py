@@ -176,7 +176,8 @@ group.add_argument('--model-kwargs', nargs='*', default={}, action=utils.ParseKw
 # Single-model scale argument
 parser.add_argument('--scale-bands', type=int, default=4,
                    help='Integer controlling the range of scaling factors for random_rescale.')
-
+group.add_argument('--cl-lambda', default=0,  type=float,
+                   help='lambda to scale cl term')
 # Device & distributed
 group = parser.add_argument_group('Device parameters')
 group.add_argument('--device', default='cuda', type=str,
@@ -315,7 +316,7 @@ def train_one_epoch(
         optimizer,
         loss_fn,
         args,
-        alpha = 0.1,
+        alpha = 0.01,
         device=torch.device('cuda'),
         lr_scheduler=None,
         output_dir=None,

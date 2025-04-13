@@ -60,20 +60,22 @@ class CScaleSelectFC(nn.Module):
         """
         # conv each scale
         feats = []
-        for i in range(self.num_scales):
+        
+        for i in range(len(x_list)):
             x = F.relu(self.bns(self.convs(x_list[i])))
             feats.append(x)
         
         # Resize all features to the middle scale size
         middle_idx = len(feats) // 2
         target_size = feats[middle_idx].shape[-2:]
-        
         # Resize and apply learnable resizing layers
         resized_feats = []
+        
         for i, feat in enumerate(feats):
             feat_resized = F.interpolate(feat, size=target_size, mode='bilinear', align_corners=False)
             feat_resized = self.resizing_layers[i](feat_resized)
             resized_feats.append(feat_resized)
+        
         del feats
         # global avg pool => shape [N, out_chans]
         pooled_list = [f.mean(dim=(2,3)) for f in resized_feats]
@@ -137,7 +139,8 @@ class AlexMaxBypassFC(nn.Module):
         # S1
         self.s1= S1(kernel_size=11, stride=4, padding=0)
         # C1 with scale selection
-        self.c1 = CScaleSelectFC(in_chans=96, out_chans=96, num_scales=ip_scale_bands)
+        self.c1_main_route = CScaleSelectFC(in_chans=96, out_chans=96, num_scales=3)
+        self.c1 = CScaleSelectFC(in_chans=96, out_chans=96, num_scales=self.ip_scale_bands+1)
         
         # S2
         self.s2 = S2(kernel_size=3, stride=1, padding=2)
@@ -249,32 +252,26 @@ class AlexMaxBypassFC(nn.Module):
         # 1) Multi-scale input
         if main_route:
             out = self.make_ip(x, 2, center)
+            out = self.s1(out)
+            c1_out, scale_logits = self.c1_main_route(out)
         else:
+
             out = self.make_ip(x, self.ip_scale_bands, center)
-       
-
-        # 2) S1
-        out = self.s1(out)  # list of length num_scales => each [N,96,Hs1,Ws1]
-       
-
-        # 3) C1 with scale selection => returns [fused], scale_logits
-        c1_out, scale_logits = self.c1(out)
+            out = self.s1(out)
+            c1_out, scale_logits = self.c1(out)
         del out 
+        
         # c1_out => list with 1 element => shape [N,96,Hc1,Wc1]
         fused_c1 = c1_out[0]
-        
         # Bypass path
         bypass_out = self.bypass(fused_c1)  # => [N,256, Hc1/4, Wc1/4]
-
         # 4) S2 => returns [N,256,Hs2,Ws2]
         s2_out = self.s2(c1_out)  # => list with 1 element [N,256,Hs2,Ws2]
         fused_s2 = s2_out[0]
-        
         # 5) C2 => purely spatial pool or a normal C. We'll do just a pool example
         c2_out = self.c2_pool(fused_s2)  # => [N,256,Hs2/2,Ws2/2]
         # wrap it in a list for S3
         c2_out_list = [c2_out]
-
         # 6) S3
         s3_out = self.s3(c2_out_list)  # => [ [N,256,Hs3,Ws3] ]
         fused_s3 = s3_out[0]
@@ -295,7 +292,7 @@ class AlexMaxBypassFC(nn.Module):
         out = self.fc(out_flat)  # => [N,num_classes]
 
         if self.contrastive_loss:
-            return out, scale_logits, fused_s3, fused_c1 
+            return out, scale_logits, fused_c1, c2_out, fused_s3  
         else:
             return out, scale_logits
 
@@ -307,40 +304,18 @@ class ChAlexMaxBypassFC(nn.Module):
     def __init__(self, 
                  in_chans=3,
                  num_classes=1000,
-                 contrastive_loss=False,
-                 ip_scale_bands=2,
+                 contrastive_loss=True,
+                 ip_scale_bands=11,
                  **kwargs):
         super().__init__()
         
         self.contrastive_loss = contrastive_loss
         self.ip_scale_bands = ip_scale_bands
-
-        # S1
-        self.s1= S1(kernel_size=11, stride=4, padding=0)
-        # C1 with scale selection
-        self.c1 = CScaleSelectFC(in_chans=96, out_chans=96, num_scales=ip_scale_bands)
+        self.model_backbone = AlexMaxBypassFC(in_chans=in_chans, 
+                                              num_classes=num_classes,
+                                              contrastive_loss=self.contrastive_loss,
+                                                ip_scale_bands=self.ip_scale_bands)
         
-        # S2
-        self.s2 = S2(kernel_size=3, stride=1, padding=2)
-        # C2 (purely spatial if you want - example: a maxpool for downsample)
-        self.c2_pool = nn.MaxPool2d(kernel_size=3, stride=2)
-        
-        # S3
-        self.s3 = S3()
-
-        # Bypass path from c1 output => merges after s3
-        self.bypass = BypassPath(in_chans=96, out_chans=256)
-
-        # final classifier
-        # after merging main(256) + bypass(256) => 512 channels
-        self.fc = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(512*6*6, 4096),  # if final map is 6x6 -> 512*(6*6)
-            nn.ReLU(True),
-            nn.Dropout(0.5),
-            nn.Linear(4096, num_classes)
-        )
-
     def make_ip(self, x, num_scale_bands, center=None):
         ## num_scale_bands = num images in IP - 1
         
@@ -427,58 +402,17 @@ class ChAlexMaxBypassFC(nn.Module):
 
     def forward(self, x, main_route=False, center=None):
         
-        # 1) Multi-scale input
-        if main_route:
-            out = self.make_ip(x, 2, center)
-        else:
-            out = self.make_ip(x, self.ip_scale_bands, center)
+        out_1, scale_logits_1, fused_c1_1, c2_out, fused_s3 = self.model_backbone(x, main_route=True, center=center)
        
-
-        # 2) S1
-        out = self.s1(out)  # list of length num_scales => each [N,96,Hs1,Ws1]
+        out_2, scale_logits_2, fused_c1_2, c2_out, fused_s3 = self.model_backbone(x, main_route=False, center=center)
        
-
-        # 3) C1 with scale selection => returns [fused], scale_logits
-        c1_out, scale_logits = self.c1(out)
-        del out 
-        # c1_out => list with 1 element => shape [N,96,Hc1,Wc1]
-        fused_c1 = c1_out[0]
+        c1_correct_scale_loss = torch.mean(torch.abs(fused_c1_1 - fused_c1_2))
+        c2_correct_scale_loss = torch.mean(torch.abs(c2_out - c2_out))
+        s3_correct_scale_loss = torch.mean(torch.abs(fused_s3 - fused_s3))
+        out_correct_scale_loss = torch.mean(torch.abs(out_1 - out_2))
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + s3_correct_scale_loss + 0.1*out_correct_scale_loss
+        return out_1, scale_logits_2,correct_scale_loss
         
-        # Bypass path
-        bypass_out = self.bypass(fused_c1)  # => [N,256, Hc1/4, Wc1/4]
-
-        # 4) S2 => returns [N,256,Hs2,Ws2]
-        s2_out = self.s2(c1_out)  # => list with 1 element [N,256,Hs2,Ws2]
-        fused_s2 = s2_out[0]
-        
-        # 5) C2 => purely spatial pool or a normal C. We'll do just a pool example
-        c2_out = self.c2_pool(fused_s2)  # => [N,256,Hs2/2,Ws2/2]
-        # wrap it in a list for S3
-        c2_out_list = [c2_out]
-
-        # 6) S3
-        s3_out = self.s3(c2_out_list)  # => [ [N,256,Hs3,Ws3] ]
-        fused_s3 = s3_out[0]
-
-        # 7) Merge with bypass => cat
-        # Make sure bypass_out shape matches fused_s3
-        # If S2 + C2 each did stride=2 => total stride=4 from c1 => you want the bypass to do the same
-        bypass_out = F.interpolate(bypass_out, size=fused_s3.shape[-2:], mode='bilinear', align_corners=False)
-        merged = torch.cat([fused_s3, bypass_out], dim=1)  # => [N,512,Hfinal,Wfinal]
-
-        # 8) global pool => assume final is 6x6
-        # or if not 6x6, adapt your fc accordingly
-        # Just do adaptive pool to 6x6
-        out_pool = F.adaptive_avg_pool2d(merged, (6,6))  # => [N,512,6,6]
-        out_flat = out_pool.view(out_pool.size(0), -1)   # => [N,512*6*6]
-
-        # 9) final fc
-        out = self.fc(out_flat)  # => [N,num_classes]
-
-        if self.contrastive_loss:
-            return out, scale_logits, fused_s3, fused_c1 
-        else:
-            return out, scale_logits
 # Memory-efficient version
 class CScaleSelectFCClean(nn.Module):
     """

@@ -63,10 +63,6 @@ def load_wordnet_to_numeric_mapping(txt_file_path: str) -> dict:
 # Get the directory of the current script
 current_dir = os.path.dirname(__file__)
 wordnet_to_label_txt = os.path.join(current_dir, '_info', 'wordnetids_to_labels.txt')
-# Load WordNet ID to Class Label Mapping from text file
-#wordnet_to_label_txt = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/EVF-SAM/wordnetids_to_labels.txt"
-#if not os.path.exists(wordnet_to_label_txt):
-#    wordnet_to_label_txt =  '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/wordnetids_to_labels.txt'
 wordnet_to_label = {}
 with open(wordnet_to_label_txt, 'r') as f:
     for line in f:
