@@ -50,8 +50,11 @@ class AlexNet(nn.Module):
                         227: 9216,
                         270: 12544,
                         321: 16384,
+                        322: 16384,
                         382: 25600,
                         454: 43264}
+
+        print(f"Channel size: {kwargs['channel_size']}")
 
         self.fc = nn.Sequential(
             nn.Dropout(0.5),

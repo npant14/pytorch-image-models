@@ -8,8 +8,8 @@ cls_input_size=${4:-9216}
 gpus=${5:-8}
 batch_size=${6:-128}
 bypass=${7:-False}
-time_limit=${8:-"120:00:00"}  # Default: 120 hours
-local=${9:-False}
+time_limit=${8:-"120:00:00"}  # Default: 120 hours, or "local"
+lr=${9:-0.01}  # Default learning rate
 
 # Add bypass suffix if True
 if [ "$bypass" = "True" ]; then
@@ -30,6 +30,7 @@ cp submit_template.sh $temp_script
 # Replace placeholders with actual values
 sed -i "s|JOB_NAME|${job_name}|g" $temp_script
 sed -i "s|MODEL_NAME|${model}|g" $temp_script
+sed -i "s|LR_VALUE|${lr}|g" $temp_script
 sed -i "s|IP_BANDS_VALUE|${ip_bands}|g" $temp_script
 sed -i "s|CL_LAMBDA_VALUE|${cl_lambda}|g" $temp_script
 sed -i "s|CLS_INPUT_SIZE|${cls_input_size}|g" $temp_script
@@ -39,7 +40,7 @@ sed -i "s|BYPASS_VALUE|${bypass}|g" $temp_script
 sed -i "s|BYPASS_STR_VALUE|${bypass_str}|g" $temp_script
 sed -i "s|TIME_LIMIT|${time_limit}|g" $temp_script
 
-if [ "$local" = "True" ]; then
+if [ $time_limit = "local" ]; then
     # Run the job locally
     bash $temp_script
     exit

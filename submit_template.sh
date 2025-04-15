@@ -34,6 +34,7 @@ CLASSIFIER_INPUT_SIZE=CLS_INPUT_SIZE
 CL_LAMBDA=CL_LAMBDA_VALUE
 INPUT_SIZE="3 322 322"
 GPUS=GPU_COUNT
+LR=LR_VALUE
 IP_BANDS=IP_BANDS_VALUE
 BATCH_SIZE=BATCH_SIZE_VALUE
 BYPASS=BYPASS_VALUE
@@ -43,7 +44,8 @@ BASE_EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${I
 EXPERIMENT_NAME="${BASE_EXPERIMENT_NAME}"
 
 # Check if directory exists and append suffix if needed
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train"
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/2"
+mkdir -p OUTPUT_DIR
 SUFFIX_COUNT=1
 
 while [ -d "${OUTPUT_DIR}/${EXPERIMENT_NAME}" ]; do
@@ -58,12 +60,12 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset $DATASET \
     --model $MODEL \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS \
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b $BATCH_SIZE \
     --epochs 90 \
-    --lr 1e-4 \
+    --lr $LR \
     --weight-decay 5e-4 \
     --sched step \
     --momentum 0.9 \
@@ -75,4 +77,4 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --train-crop-mode rrc \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
-    --output /oscar/data/tserre/xyu110/pytorch-output/train/
+    --output $OUTPUT_DIR

@@ -655,8 +655,10 @@ def main():
         else:
             if utils.is_primary(args):
                 _logger.info("Using native Torch DistributedDataParallel.")
-            model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
-                            #   ,find_unused_parameters=True)
+            if args.model_kwargs['ip_scale_bands'] == 1:
+                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb,find_unused_parameters=True)
+            else:
+                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
         # NOTE: EMA model does not need to be wrapped by DDP
 
     # if args.torchcompile:
@@ -1089,7 +1091,7 @@ def train_one_epoch(
             # with amp_autocast():
             scale_loss = 0
             try:
-                if model.contrastive_loss:
+                if model.module.contrastive_loss:
                     # pdb.set_trace()
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
@@ -1178,7 +1180,7 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
-                    f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
+                    # f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
                     # f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
                     # f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
                     f'LR: {lr:.3e}  '

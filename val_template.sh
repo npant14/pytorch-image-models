@@ -31,10 +31,21 @@ BYPASS_STR=BYPASS_STR_VALUE
 IMAGE_SCALE="IMAGE_SCALE_VALUE"
 RESULTS_DIR="RESULTS_DIR_VALUE"
 
-mkdir -p $RESULTS_DIR
-
 # MODEL_PTH_USED="model_best"
-MODEL_PTH_USED="last"
+if [ $MODEL = "contrastive_resmaxv1" ]; then
+    MODEL_PTH_USED="model_best"
+else
+    MODEL_PTH_USED="last"
+fi
+
+
+if [ "CKPT_DIR_VALUE" != "" ]; then
+    CHECKPOINT_PATH="CKPT_DIR_VALUE/${MODEL_PTH_USED}.pth.tar"
+else
+    CHECKPOINT_PATH="/oscar/data/tserre/xyu110/pytorch-output/train/1/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}/${MODEL_PTH_USED}.pth.tar"
+fi
+
+mkdir -p $RESULTS_DIR
 
 # Run validation for specified parameters
 sh distributed_val.sh $GPUS validate.py \
@@ -45,5 +56,5 @@ sh distributed_val.sh $GPUS validate.py \
     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
     --input-size $INPUT_SIZE \
     --pretrained \
-    --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]/${MODEL_PTH_USED}.pth.tar \
-    --results-file ${RESULTS_DIR}/validation_output_${MODEL_PTH_USED}.csv
+    --checkpoint $CHECKPOINT_PATH \
+    --results-file ${RESULTS_DIR}/validation0401_${MODEL_PTH_USED}.csv
