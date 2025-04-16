@@ -63,33 +63,6 @@ class Residual(nn.Module):
         Y += X
         return F.relu(Y)
     
-class Residual1(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, strides=1):
-        
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels,
-                               kernel_size=kernel_size, padding=1, stride=strides, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels,
-                               kernel_size=kernel_size, padding=1, bias=False)
-        
-        if strides > 1 or in_channels != out_channels:
-            self.conv3 = nn.Conv2d(in_channels, out_channels,
-                                   kernel_size=1, stride=strides, bias=False)
-        else:
-            self.conv3 = None
-
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.bn3 = nn.BatchNorm2d(out_channels)
-
-    def forward(self, X):
-        Y = F.relu(self.bn1(self.conv1(X)))
-        Y = self.bn2(self.conv2(Y))
-        if self.conv3:
-            X = self.bn3(self.conv3(X))
-        Y += X
-        return F.relu(Y)
-    
 class S1_Res(nn.Module):
     def __init__(self):
         super(S1_Res, self).__init__()
@@ -349,6 +322,73 @@ class S2b_Res1(nn.Module):
     def forward(self, x_pyramid):
         bypass = [torch.cat([seq(out) for seq in self.s2b_seqs], dim=1) for out in x_pyramid]
         return bypass
+    
+class Residual1(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, strides=1):
+        
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels,
+                               kernel_size=kernel_size, padding=1, stride=strides, bias=False)
+        self.conv2 = nn.Conv2d(out_channels, out_channels,
+                               kernel_size=kernel_size, padding=1, bias=False)
+        
+        if strides > 1 or in_channels != out_channels:
+            self.conv3 = nn.Conv2d(in_channels, out_channels,
+                                   kernel_size=1, stride=strides, bias=False)
+        else:
+            self.conv3 = None
+
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.bn3 = nn.BatchNorm2d(out_channels)
+
+    def forward(self, X):
+        Y = F.relu(self.bn1(self.conv1(X)))
+        Y = self.bn2(self.conv2(Y))
+        if self.conv3:
+            X = self.bn3(self.conv3(X))
+        Y += X
+        return F.relu(Y)
+
+class C_pool(nn.Module):
+    # Spatial then Scale
+    def __init__(self,
+                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+                 pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+                 global_scale_pool=False):
+        super(C_pool, self).__init__()
+        self.pool1 = pool_func1
+        self.pool2 = pool_func2
+        self.global_scale_pool = global_scale_pool
+
+        if self.global_scale_pool:
+            self.adaptive_pool = nn.AdaptiveAvgPool2d(1)
+
+    def forward(self, x_pyramid):
+        if self.global_scale_pool:
+            # Apply global adaptive average pooling to each image in the pyramid
+            pooled = [self.adaptive_pool(x) for x in x_pyramid]
+            # Flatten and concatenate features across scales
+            flattened = [x.view(x.size(0), -1) for x in pooled]
+            out = torch.cat(flattened, dim=1)  # Shape: (B, sum(C))
+            return out
+
+        out = []
+        if len(x_pyramid) == 1:
+            return [self.pool1(x_pyramid[0])]
+
+        for i in range(len(x_pyramid) - 1):
+            x1 = self.pool1(x_pyramid[i])
+            x2 = self.pool2(x_pyramid[i + 1])
+            # Align spatial size
+            if x1.shape[-1] > x2.shape[-1]:
+                x2 = F.interpolate(x2, size=x1.shape[-2:], mode='bilinear')
+            else:
+                x1 = F.interpolate(x1, size=x2.shape[-2:], mode='bilinear')
+            x = torch.stack([x1, x2], dim=4)
+            to_append, _ = torch.max(x, dim=4)
+            out.append(to_append)
+        return out
 
 
 class RESMAX_V3(nn.Module):
@@ -385,8 +425,8 @@ class RESMAX_V3(nn.Module):
         )
         
         self.s2 = nn.Sequential(
-            Residual(64, 64),
-            Residual(64, 64)
+            Residual1(64, 64),
+            Residual1(64, 64)
         )
 
         # C2 using optimized layer
@@ -411,12 +451,12 @@ class RESMAX_V3(nn.Module):
             )
 
         self.s3 = nn.Sequential(
-            Residual(64, 128, strides=2),
-            Residual(128, 128),
-            Residual(128, 256, strides=2),
-            Residual(256, 256),
-            Residual(256, 512, strides=2),
-            Residual(512, 512)
+            Residual1(64, 128, strides=2),
+            Residual1(128, 128),
+            Residual1(128, 256, strides=2),
+            Residual1(256, 256),
+            Residual1(256, 512, strides=2),
+            Residual1(512, 512)
         )
 
         if self.ip_scale_bands > 4:
@@ -430,10 +470,9 @@ class RESMAX_V3(nn.Module):
                 global_scale_pool=False
             )
         else:
-            self.global_pool = C(global_scale_pool=True)
+            self.global_pool = C_pool(global_scale_pool=True)
 
         self.fc= nn.Sequential(
-            nn.Dropout(0.5),
             nn.Linear(classifier_input_size, num_classes)
         )
 

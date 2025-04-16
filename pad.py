@@ -67,7 +67,8 @@ def pad_batch(images, target_size):
     pad_right = pad_w - pad_left
 
     # Apply padding
-    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+    # Use reflection padding to avoid artifacts, or constant for default
+    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='reflect')
 
     return padded_images
 
