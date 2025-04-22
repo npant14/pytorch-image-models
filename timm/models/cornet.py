@@ -94,10 +94,13 @@ class CORblock_S(nn.Module):
 
 
 class CORnet_S(nn.Module):
-    def __init__(self, num_classes=1000):
+    def __init__(self, num_classes=1000, **kwargs):
         super(CORnet_S, self).__init__()
         self.num_classes = num_classes
         self.contrastive_loss = False
+        self.V2_iterations = kwargs.get('V2_iterations', 2)
+        self.V4_iterations = kwargs.get('V4_iterations', 4)
+        self.IT_iterations = kwargs.get('IT_iterations', 2)
 
         self.model = nn.Sequential(OrderedDict([
                     ('V1', nn.Sequential(OrderedDict([  # this one is custom to save GPU memory
@@ -112,9 +115,9 @@ class CORnet_S(nn.Module):
                         ('nonlin2', nn.ReLU(inplace=True)),
                         ('output', Identity())
                     ]))),
-                    ('V2', CORblock_S(64, 128, times=2)),
-                    ('V4', CORblock_S(128, 256, times=4)),
-                    ('IT', CORblock_S(256, 512, times=2)),
+                    ('V2', CORblock_S(64, 128, times=self.V2_iterations)),
+                    ('V4', CORblock_S(128, 256, times=self.V4_iterations)),
+                    ('IT', CORblock_S(256, 512, times=self.IT_iterations)),
                     ('decoder', nn.Sequential(OrderedDict([
                         ('avgpool', nn.AdaptiveAvgPool2d(1)),
                         ('flatten', Flatten()),

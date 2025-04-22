@@ -11,7 +11,6 @@ Command-line arguments remain largely the same, except references to teacher/stu
 
 Author: ChatGPT
 """
-print(f"Starting script")
 
 import argparse
 import importlib
@@ -24,7 +23,6 @@ import random
 import json
 from collections import OrderedDict
 from datetime import datetime
-print(f"Importing modules")
 import numpy as np
 import torch
 import torch.nn as nn
@@ -45,7 +43,6 @@ try:
     has_apex = True
 except ImportError:
     has_apex = False
-print(f"Importing timm")
 from timm import utils
 from timm.data import create_dataset, create_loader, resolve_data_config, AugMixDataset, create_loader_scale
 from timm.layers import convert_sync_batchnorm, set_fast_norm
@@ -53,7 +50,7 @@ from timm.models import create_model, safe_model_name, resume_checkpoint, model_
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler_v2, scheduler_kwargs
 from timm.utils import ApexScaler, NativeScaler
-print(f"Importing timm done")
+import matplotlib.pyplot as plt
 has_native_amp = False
 try:
     if getattr(torch.cuda.amp, 'autocast') is not None:
@@ -178,6 +175,8 @@ parser.add_argument('--scale-bands', type=int, default=4,
                    help='Integer controlling the range of scaling factors for random_rescale.')
 group.add_argument('--cl-lambda', default=0,  type=float,
                    help='lambda to scale cl term')
+group.add_argument('--alpha', default=0.01,  type=float,
+                   help='lambda to scale cl term')
 # Device & distributed
 group = parser.add_argument_group('Device parameters')
 group.add_argument('--device', default='cuda', type=str,
@@ -245,6 +244,8 @@ group.add_argument('--train-crop-mode', type=str, default=None,
                    help='Crop-mode in train')
 group.add_argument('--hflip', type=float, default=0.5,
                    help='Horizontal flip training aug probability')
+group.add_argument('--scale', type=float, nargs='+', default=[0.08, 1.0], metavar='PCT',
+                   help='Random resize scale (default: 0.08 1.0)')
 
 # Miscellaneous parameters
 group = parser.add_argument_group('Miscellaneous parameters')
@@ -309,6 +310,37 @@ def random_rescale(x, scale_bands=4):
         x_rescaled = center_crop(x_rescaled)
     return x_rescaled
 
+def scale_bands_range(bands,new_max,new_min=0,  old_min=0, old_max=10):
+    """
+    Maps integer 'bands' in [old_min..old_max] to a new range [new_min..new_max].
+    If you want discrete buckets, you can add rounding or integer division.
+    """
+    
+    old_range = old_max - old_min
+    new_range = new_max - new_min
+    
+    # convert to float for safe division, then scale
+    scaled = (bands - old_min) / old_range * new_range + new_min
+    
+    # For integer buckets, round or floor/ceil as desired:
+    scaled = torch.floor(scaled)
+    
+    # convert back to int if needed
+    return scaled.long()
+
+def save_image(image, filename):
+    # Convert the image to numpy array and transpose to HWC format
+    image_np = image.cpu().numpy().transpose(1, 2, 0)
+    
+    # Normalize the image to [0, 255] range
+    image_np = (image_np - image_np.min()) / (image_np.max() - image_np.min())
+    image_np = (image_np * 255).astype(np.uint8)
+    
+    # Save the image
+    plt.imsave(filename, image_np)
+    print(f"Saved image to {filename}")
+
+
 def train_one_epoch(
         epoch,
         model,
@@ -316,7 +348,6 @@ def train_one_epoch(
         optimizer,
         loss_fn,
         args,
-        alpha = 0.01,
         device=torch.device('cuda'),
         lr_scheduler=None,
         output_dir=None,
@@ -326,7 +357,7 @@ def train_one_epoch(
         num_updates_total=None,
 ):
     
-    print(f"Model created")
+    alpha = args.alpha
     running_loss = 0.
     last_loss = 0.
 
@@ -349,41 +380,59 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target, scale_band, center) in enumerate(loader):
+
+        # save one image from the batch for debugging
+        if batch_idx == 0:
+            save_image(input[0], f"input_{batch_idx}.png")
         
+        num_bands = args.scale_bands
         
         input = input.to(device)
         target = target.to(device)
         scale_band = scale_band.to(device)
-        scale_band = 10 - scale_band  # So larger scale_band is smaller loss
+        #scale_band = scale_band  # So larger scale_band is smaller loss
+       
+        scale_band = 5- scale_bands_range(scale_band, new_max=num_bands)
+       
         center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps   
-
+        
         def _forward():
             scale_loss = 0
             scale_selection_loss = 0
             try:
-                
                 if model.module.contrastive_loss:
                     output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (alpha*scale_selection_loss) + (args.cl_lambda*scale_loss)
+                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
+                    scale_loss = args.cl_lambda*scale_loss
+                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
                 else:
                     output, scale_logits = model(input)
-                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (alpha*scale_selection_loss)
+                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (scale_selection_loss)
             except Exception as e:
                 if model.contrastive_loss:
                     output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (alpha*scale_selection_loss) + (args.cl_lambda*scale_loss)
+                    scale_selection_loss =alpha* F.cross_entropy(scale_logits, scale_band)
+                    scale_loss = args.cl_lambda*scale_loss
+                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
                 else:
                     output, scale_logits  = model(input)
-                    scale_selection_loss = F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (alpha*scale_selection_loss)
+                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
+                    loss = loss_fn(output, target) + (scale_selection_loss)
                     
+            #print one sample from scale_logits and its ground truth
+            #apply softmax to scale_logits
+            scale_logits = F.softmax(scale_logits, dim=1)
+            #print the scale that was selected the most in the batch
+            selected_scale = torch.argmax(scale_logits, dim=1)
+            count_selected_scale = torch.bincount(selected_scale)
+            print(count_selected_scale)
+            count_gt_scale = torch.bincount(scale_band)
+            print(count_gt_scale)
             return loss, scale_selection_loss, scale_loss
 
         def _backward(_loss):
@@ -501,8 +550,10 @@ def validate(
                 input = input.contiguous(memory_format=torch.channels_last)
             
             # (class_logits, scale_logits) = model(input)
-            output, scale_logits = model(input)
+            output, scale_logits,scale_loss = model(input)
             loss = loss_fn(output, target)
+            scale_loss = args.cl_lambda*scale_loss
+            loss = loss + scale_loss
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             losses_m.update(loss.item(), input.size(0))
             top1_m.update(acc1.item(), input.size(0))
@@ -617,6 +668,7 @@ def main():
         train_crop_mode=args.train_crop_mode,
         hflip=args.hflip,
         interpolation=data_config['interpolation'],
+        scale=args.scale,
         mean=data_config['mean'],
         std=data_config['std'],
         num_workers=args.workers,

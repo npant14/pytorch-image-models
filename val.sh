@@ -12,35 +12,32 @@
 #SBATCH --mail-type=END,FAIL
 
 
-module load miniconda3/23.11.0s
-source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-conda activate env_default
 
-cd /users/xyu110/pytorch-image-models
+
+
 
 DATASET="torch/imagenet"
-MODEL="resmax_v2"
-CLASSIFIER_INPUT_SIZE=9216
+MODEL="chresmax_v2"
+CLASSIFIER_INPUT_SIZE=18432
 CL_LAMBDA=0
 INPUT_SIZE="3 322 322"
 GPUS=2
-BATCH_SIZE=64
+BATCH_SIZE=128
 
 # add for loop to run multiple scales
-for imgscale in 160
+for imgscale in 160 192 227 271 322 454
 do
     for IP_BANDS in 3
     do
         sh distributed_val.sh $GPUS validate.py \
-            --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
+            --data-dir /gpfs/data/tserre/npant1/ILSVRC/  \
             --model $MODEL \
             -b $BATCH_SIZE \
-            --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=False \
+            --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE  bypass=True \
             --image-scale 3 $imgscale $imgscale \
             --input-size $INPUT_SIZE \
-            --pretrained \
-            --checkpoint /oscar/data/tserre/xyu110/pytorch-output/train/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_0_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]/model_best.pth.tar \
-            --results-file /oscar/data/tserre/xyu110/pytorch-output/train/batch_size_128/${imgscale}_ip_${IP_BANDS}_${MODEL}_gpu_8_cl_0_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_].txt
+            --checkpoint  /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/2_25/debug5_resize2_{chresmax_v2}_bypass_cl_{0.1}_ip_{3}_322_{18432}/model_best.pth.tar \
+            --results-file  /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/validation/${imgscale}debug5_resize2_{chresmax_v2}_bypass_cl_{0.1}_ip_{3}_322_{18432}.txt
         wait
     done
 done

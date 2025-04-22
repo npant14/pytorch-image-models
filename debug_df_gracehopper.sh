@@ -16,18 +16,23 @@
 
 # source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
-MODEL=alexmax_bypass_dl
+MODEL=chalexmax_bypass_dl_v2
+SCALE_BANDS=5
+ALPHA=10
+CL_LAMBDA=0.1
 echo "Starting experiment"
 sh distributed_stu_dl.sh 1 train_skeleton_dl.py \
     --data-dir /oscar/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $MODEL \
-    --model-kwargs ip_scale_bands=11 classifier_input_size=9216 hmax_type='alexmax_v3' \
-    --scale-bands 11 \
+    --model-kwargs ip_scale_bands=$SCALE_BANDS classifier_input_size=9216 \
+    --scale-bands $SCALE_BANDS \
     --opt sgd \
     -b 256 \
     --epochs 90 \
-    --lr 1e-2 \
+    --cl-lambda $CL_LAMBDA \
+    --alpha $ALPHA \
+    --lr 1e-3 \
     --weight-decay 5e-4 \
     --sched step \
     --momentum 0.9 \
@@ -36,8 +41,9 @@ sh distributed_stu_dl.sh 1 train_skeleton_dl.py \
     --warmup-epochs 0 \
     --hflip 0.5\
     --train-crop-mode rrc\
+    --scale 1.0 1.0 \
     --input-size 3 322 322\
-    --experiment 4debug_dl_${MODEL}_3_cl_1_ip_10_322_9216 \
-    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/3_25/\
+    --experiment gracehopper_debug2_dl_${MODEL}_${SCALE_BANDS}_322_9216_alpha_${ALPHA}_cl_lambda_${CL_LAMBDA} \
+    --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/\
     
  

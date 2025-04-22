@@ -146,9 +146,8 @@ class C_scoring2_optimized(nn.Module):
             scores = torch.stack([score_a, score_b], dim=1)  # => [N, 2, 1, H', W']
             feats = torch.stack([a, b], dim=1)               # => [N, 2, C, H', W']
 
-            del a, b, score_a, score_b
-
             out_feats.append(soft_selection(scores, feats))
+            del a, b, score_a, score_b
             del scores, feats
 
         return out_feats
