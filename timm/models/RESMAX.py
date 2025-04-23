@@ -20,7 +20,7 @@ from ._manipulate import checkpoint_seq
 from ._registry import register_model, generate_default_cfgs
 from .ALEXMAX import C_scoring, C
 from .ALEXMAX3 import C_scoring2
-from .ALEXMAX3_optimized import C_scoring2_optimized
+from .ALEXMAX3_optimized import C_scoring2_optimized, C_scoring2_optimized_debug
 from .HMAX import get_ip_scales
 
 def pad_to_size(a, size, mode='constant'):
@@ -157,7 +157,7 @@ class RESMAX_V2(nn.Module):
         self.s1 = S1_Res()
 
         # C1 using optimized layer
-        self.c1 = C_scoring2_optimized(
+        self.c1 = C_scoring2_optimized_debug(
             num_channels=96,
             pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
             pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
@@ -315,8 +315,8 @@ class S2b_Res1(nn.Module):
             ))
             # Stack of residual blocks
             for _ in range(num_blocks):
-                blocks.append(Residual(256, 256))
-                
+                blocks.append(Residual1(256, 256))
+
             self.s2b_seqs.append(nn.Sequential(*blocks))
 
     def forward(self, x_pyramid):
@@ -350,50 +350,53 @@ class Residual1(nn.Module):
         Y += X
         return F.relu(Y)
 
-class C_pool(nn.Module):
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class C_adp(nn.Module):
     # Spatial then Scale
     def __init__(self,
                  pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
                  pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
-                 global_scale_pool=False):
-        super(C_pool, self).__init__()
+                 global_scale_pool=None):
+        super(C_adp, self).__init__()
         self.pool1 = pool_func1
         self.pool2 = pool_func2
         self.global_scale_pool = global_scale_pool
 
-        if self.global_scale_pool:
-            self.adaptive_pool = nn.AdaptiveAvgPool2d(1)
-
     def forward(self, x_pyramid):
-        if self.global_scale_pool:
-            # Apply global adaptive average pooling to each image in the pyramid
-            pooled = [self.adaptive_pool(x) for x in x_pyramid]
-            # Flatten and concatenate features across scales
-            flattened = [x.view(x.size(0), -1) for x in pooled]
-            out = torch.cat(flattened, dim=1)  # Shape: (B, sum(C))
-            return out
-
         out = []
-        if len(x_pyramid) == 1:
-            return [self.pool1(x_pyramid[0])]
 
-        for i in range(len(x_pyramid) - 1):
-            x1 = self.pool1(x_pyramid[i])
-            x2 = self.pool2(x_pyramid[i + 1])
-            # Align spatial size
-            if x1.shape[-1] > x2.shape[-1]:
-                x2 = F.interpolate(x2, size=x1.shape[-2:], mode='bilinear')
-            else:
-                x1 = F.interpolate(x1, size=x2.shape[-2:], mode='bilinear')
-            x = torch.stack([x1, x2], dim=4)
-            to_append, _ = torch.max(x, dim=4)
-            out.append(to_append)
+        if self.global_scale_pool is not None:
+            pooled = [self.global_scale_pool(x) for x in x_pyramid]
+            out = pooled[0]
+            for p in pooled[1:]:
+                out = torch.max(out, p)
+
+        else:
+            if len(x_pyramid) == 1:
+                return [self.pool1(x_pyramid[0])]
+
+            for i in range(len(x_pyramid) - 1):
+                x_1 = self.pool1(x_pyramid[i])
+                x_2 = self.pool2(x_pyramid[i + 1])
+
+                # Interpolate to match spatial sizes
+                if x_1.shape[-1] > x_2.shape[-1]:
+                    x_2 = F.interpolate(x_2, size=x_1.shape[-2:], mode='bilinear')
+                else:
+                    x_1 = F.interpolate(x_1, size=x_2.shape[-2:], mode='bilinear')
+
+                stacked = torch.stack([x_1, x_2], dim=-1)
+                to_append, _ = torch.max(stacked, dim=-1)
+                out.append(to_append)
+
         return out
 
-
 class RESMAX_V3(nn.Module):
-    def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
-                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False,
+    def __init__(self, num_classes=1000, in_chans=3, 
+                 ip_scale_bands=1, classifier_input_size=512, contrastive_loss=False, pyramid=False,
                  bypass=False, main_route=False,
                  c_scoring='v2',
                  **kwargs):
@@ -402,8 +405,173 @@ class RESMAX_V3(nn.Module):
         self.contrastive_loss = contrastive_loss
         self.ip_scale_bands = ip_scale_bands
         self.pyramid = pyramid
-        self.big_size = big_size
-        self.small_size = small_size
+        self.bypass = bypass
+        self.c_scoring = c_scoring
+        self.main_route = main_route
+        self.classifier_input_size = classifier_input_size
+        
+        super(RESMAX_V3, self).__init__()
+
+        self.s1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU()
+        )
+
+        # C1 using optimized layer
+        self.c1 = C_scoring2_optimized(
+            num_channels=64,
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+            pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+            skip=1,
+            global_scale_pool=False
+        )
+        
+        self.s2 = nn.Sequential(
+            Residual1(64, 64),
+            Residual1(64, 64)
+        )
+
+        # C2 using optimized layer
+        self.c2 = C_scoring2_optimized(
+            num_channels=64,
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            pool_func2=nn.MaxPool2d(kernel_size=6, stride=2),
+            resize_kernel_1=3,
+            resize_kernel_2=1,
+            skip=2,
+            global_scale_pool=False
+        )
+        
+        if self.bypass:
+            self.s2b = S2b_Res1()
+            self.c2b_seq = nn.Sequential(
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.MaxPool2d(kernel_size=3, stride=2),
+                nn.Conv2d(1024, 512, kernel_size=1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True),
+                nn.AdaptiveAvgPool2d((1, 1))
+            )
+
+        self.s3 = nn.Sequential(
+            Residual1(64, 128, strides=2),
+            Residual1(128, 128),
+            Residual1(128, 256, strides=2),
+            Residual1(256, 256),
+            Residual1(256, 512, strides=2),
+            Residual1(512, 512)
+        )
+
+        if self.ip_scale_bands > 4:
+            self.global_pool = C_scoring2_optimized(
+                num_channels=256,
+                pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+                pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
+                resize_kernel_1=3,
+                resize_kernel_2=1,
+                skip=2,
+                global_scale_pool=False
+            )
+        else:
+            self.global_pool = C_adp(global_scale_pool=nn.AdaptiveAvgPool2d((1, 1)))
+
+        if self.bypass:
+            self.classifier_input_size = classifier_input_size * 2
+
+        self.fc= nn.Sequential(
+            nn.Linear(self.classifier_input_size, num_classes)
+        )
+
+        self.print_param_stats()
+
+    def make_ip(self, x, num_scale_bands):
+        """
+        Build an image pyramid.
+        num_scale_bands = number of images in the pyramid - 1
+        """
+        base_image_size = int(x.shape[-1])
+        scale_factor = 4  # exponent factor for scaling
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale_factor)
+        
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interp_img = F.interpolate(x, size=(i_s, i_s), mode='bilinear', align_corners=False)
+                image_pyramid.append(interp_img)
+            return image_pyramid
+        else:
+            return [x]
+
+    def forward(self, x, pyramid=False):
+        def apply(module, x):
+            return [module(xi) for xi in x] if isinstance(x, list) else module(x)
+
+        if self.main_route:
+            out = self.make_ip(x, 2)
+        else:
+            out = self.make_ip(x, self.ip_scale_bands)
+        
+        out = apply(self.s1, out)
+        out_c1 = self.c1(out)
+        out = apply(self.s2, out_c1)
+        out_c2 = self.c2(out)
+        
+        if self.bypass:
+            bypass = self.s2b(out_c1)
+            bypass = self.c2b_seq(bypass[0])
+            bypass = bypass.reshape(bypass.size(0), -1)
+        
+        out = apply(self.s3, out_c2)
+        out = self.global_pool(out)
+        if isinstance(out, list):
+            out = out[0]
+        out = out.reshape(out.size(0), -1)
+
+        if self.bypass:
+            out = torch.cat([out, bypass], dim=1)
+        
+        out = self.fc(out)
+
+        if self.contrastive_loss:
+            if self.bypass:
+                return out, out_c1, out_c2, bypass
+            else:
+                return out, out_c1, out_c2
+
+        return out
+    
+    def print_param_stats(self):
+        print(f"\nParameter breakdown for {self.__class__.__name__}:\n")
+        total_params = 0
+        stats = []
+        for name, module in self.named_children():
+            n_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
+            total_params += n_params
+            stats.append((name, n_params))
+
+        stats.sort(key=lambda x: x[1], reverse=True)
+        print(f"{'Module':30s} | {'# Params':>10s} | {'% of Total':>10s}")
+        print("-" * 60)
+        for name, count in stats:
+            pct = 100 * count / total_params
+            print(f"{name:30s} | {count:10,d} | {pct:10.2f}%")
+        print("-" * 60)
+        print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
+
+    
+class RESMAX_V3_1(nn.Module):
+    def __init__(self, num_classes=1000, in_chans=3, 
+                 ip_scale_bands=1, classifier_input_size=512, contrastive_loss=False, pyramid=False,
+                 bypass=False, main_route=False,
+                 c_scoring='v2',
+                 **kwargs):
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.contrastive_loss = contrastive_loss
+        self.ip_scale_bands = ip_scale_bands
+        self.pyramid = pyramid
         self.bypass = bypass
         self.c_scoring = c_scoring
         self.main_route = main_route
@@ -470,7 +638,7 @@ class RESMAX_V3(nn.Module):
                 global_scale_pool=False
             )
         else:
-            self.global_pool = C_pool(global_scale_pool=True)
+            self.global_pool = C_adp(global_scale_pool=nn.AdaptiveAvgPool2d((1, 1)))
 
         self.fc= nn.Sequential(
             nn.Linear(classifier_input_size, num_classes)
@@ -553,7 +721,6 @@ class RESMAX_V3(nn.Module):
         print("-" * 60)
         print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
 
-    
 
 class CHRESMAX_V3(nn.Module):
     """
@@ -651,7 +818,7 @@ class CHRESMAX_V4(nn.Module):
     Example student-teacher style model with scale-consistency loss,
     using RESMAX_V2 as the backbone.
 
-    In V4, we use new loss nxent_loss.
+    In V4, we use new loss clip loss. also use reflect for padding
     In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
     the returned features are [0] for C1 and C2.
     """
@@ -662,6 +829,7 @@ class CHRESMAX_V4(nn.Module):
                  classifier_input_size=13312,
                  contrastive_loss=True,
                  bypass=False,
+                 temperature=0.1,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -669,9 +837,10 @@ class CHRESMAX_V4(nn.Module):
         self.in_chans = in_chans
         self.ip_scale_bands = ip_scale_bands
         self.bypass = bypass
+        self.temperature = temperature
         
         # Use the optimized backbone
-        self.model_backbone = RESMAX_V2(
+        self.backbone = RESMAX_V2(
             num_classes=num_classes,
             in_chans=in_chans,
             ip_scale_bands=self.ip_scale_bands,
@@ -698,7 +867,8 @@ class CHRESMAX_V4(nn.Module):
 
         if new_hw <= img_hw:
             # pad if smaller
-            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+            # 'constant', 'reflect', 'replicate' or 'circular'. Default: 'constant'
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw), mode='reflect')
         else:
             # center-crop if bigger
             center_crop = transforms.CenterCrop(img_hw)
@@ -710,55 +880,65 @@ class CHRESMAX_V4(nn.Module):
         else:
             out2, c1_feats2, c2_feats2 = self.backbone(x_rescaled)
 
-        ##############################NT-Xent Loss#############################
+
+        def clip_style_loss(z1, z2, temperature=self.temperature):
+            """
+            CLIP-style contrastive loss between original and scaled features.
+            - z1: features from original images [B, D]
+            - z2: features from rescaled images [B, D]
+            """
+            # Normalize
+            z1 = F.normalize(z1, dim=1)  # [B, D]
+            z2 = F.normalize(z2, dim=1)  # [B, D]
+
+            # Compute logits
+            logits_per_orig = torch.matmul(z1, z2.T) / temperature  # [B, B]
+            logits_per_scaled = torch.matmul(z2, z1.T) / temperature  # [B, B]
+
+            # Labels are indices [0, 1, ..., B-1]
+            labels = torch.arange(z1.size(0), device=z1.device)
+
+            loss_orig = F.cross_entropy(logits_per_orig, labels)
+            loss_scaled = F.cross_entropy(logits_per_scaled, labels)
+
+            return (loss_orig + loss_scaled) / 2
         
-        # Helper function to compute NT-Xent loss between two feature maps
-        def nt_xent_loss(f1, f2, temperature=self.temperature):
-            # Flatten spatial dimensions if needed
-            if len(f1.shape) > 2:
-                f1 = f1.reshape(f1.size(0), -1)
-                f2 = f2.reshape(f2.size(0), -1)
-            
-            # Normalize features
-            z1 = F.normalize(f1, dim=1)
-            z2 = F.normalize(f2, dim=1)
-            
-            # Concatenate features from both scales
-            features = torch.cat([z1, z2], dim=0)
-            
-            # Compute similarity matrix
-            sim_matrix = torch.matmul(features, features.T) / temperature
-            
-            # Create mask for positive pairs
-            pos_mask = torch.zeros_like(sim_matrix)
-            pos_mask[:batch_size, batch_size:] = torch.eye(batch_size)
-            pos_mask[batch_size:, :batch_size] = torch.eye(batch_size)
-            
-            # Create mask to exclude self-similarity
-            self_mask = torch.eye(2 * batch_size, device=sim_matrix.device)
-            logits_mask = torch.ones_like(sim_matrix) - self_mask
-            
-            # NT-Xent loss calculation
-            exp_logits = torch.exp(sim_matrix) * logits_mask
-            log_prob = sim_matrix - torch.log(exp_logits.sum(dim=1, keepdim=True))
-            mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)
-            
-            return -mean_log_prob_pos.mean()
-        
-        # Compute NT-Xent loss between features from different scales
-        c1_contrastive_loss = nt_xent_loss(c1_feats1, c1_feats2)
-        c2_contrastive_loss = nt_xent_loss(c2_feats1, c2_feats2)
-        
-        # Compute output contrastive loss
-        out_contrastive_loss = nt_xent_loss(out1, out2)
-        
-        # Compute bypass contrastive loss if needed
+        # Compute CLIP-style contrastive loss between features
+        if isinstance(c1_feats1, list) and isinstance(c1_feats2, list):
+            c1_contrastive_loss = 0
+            for i in range(len(c1_feats1)):
+                f1 = c1_feats1[i].reshape(c1_feats1[i].size(0), -1)
+                f2 = c1_feats2[i].reshape(c1_feats2[i].size(0), -1)
+                c1_contrastive_loss += clip_style_loss(f1, f2)
+            c1_contrastive_loss /= len(c1_feats1)
+        else:
+            f1 = c1_feats1.reshape(c1_feats1.size(0), -1)
+            f2 = c1_feats2.reshape(c2_feats2.size(0), -1)
+            c1_contrastive_loss = clip_style_loss(f1, f2)
+
+        if isinstance(c2_feats1, list) and isinstance(c2_feats2, list):
+            c2_contrastive_loss = 0
+            for i in range(len(c2_feats1)):
+                f1 = c2_feats1[i].reshape(c2_feats1[i].size(0), -1)
+                f2 = c2_feats2[i].reshape(c2_feats2[i].size(0), -1)
+                c2_contrastive_loss += clip_style_loss(f1, f2)
+            c2_contrastive_loss /= len(c2_feats1)
+        else:
+            f1 = c2_feats1.reshape(c2_feats1.size(0), -1)
+            f2 = c2_feats2.reshape(c2_feats2.size(0), -1)
+            c2_contrastive_loss = clip_style_loss(f1, f2)
+
+        # Top-level output loss
+        out_contrastive_loss = clip_style_loss(out1, out2)
+
+        # Optional: bypass contrastive
         if self.backbone.bypass:
-            bypass_contrastive_loss = nt_xent_loss(bypass1, bypass2)
+            bypass_contrastive_loss = clip_style_loss(bypass1.reshape(bypass1.size(0), -1), bypass2.reshape(bypass2.size(0), -1))
             total_loss = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss + 0.1 * bypass_contrastive_loss
         else:
             total_loss = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss
-        
+
+                            
         return out1, total_loss
     
 
@@ -1146,6 +1326,22 @@ def chresmax_v3(pretrained=False, **kwargs):
 
     model = CHRESMAX_V3(**kwargs)
     return model
+
+@register_model
+def chresmax_v4(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V4(**kwargs)
+    return model
+
 
 @register_model
 def contrastive_resmax(pretrained=False, **kwargs):

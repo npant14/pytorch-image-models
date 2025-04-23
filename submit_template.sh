@@ -1,12 +1,11 @@
 #!/bin/bash
 #SBATCH --time=TIME_LIMIT
-#SBATCH -p gpu --gres=gpu:GPU_COUNT
-#SBATCH -n GPU_COUNT
+#SBATCH --partition=PARTITION_VALUE --gres=gpu:GPU_COUNT
+#SBATCH -n CPU_COUNT
 #SBATCH -N 1
-#SBATCH --mem=60GB
+#SBATCH --mem=MEM_VALUE
 #SBATCH -o JOB_NAME.out
 #SBATCH -e JOB_NAME.err
-#SBATCH --account=carney-tserre-condo
 #SBATCH -J JOB_NAME
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
@@ -32,19 +31,25 @@ DATASET="torch/imagenet"
 MODEL="MODEL_NAME"
 CLASSIFIER_INPUT_SIZE=CLS_INPUT_SIZE
 CL_LAMBDA=CL_LAMBDA_VALUE
-INPUT_SIZE="3 322 322"
+INPUT_SIZE="3 INPUT_SIZE_VALUE INPUT_SIZE_VALUE"
 GPUS=GPU_COUNT
 LR=LR_VALUE
 IP_BANDS=IP_BANDS_VALUE
 BATCH_SIZE=BATCH_SIZE_VALUE
 BYPASS=BYPASS_VALUE
 BYPASS_STR=BYPASS_STR_VALUE
+WORKERS=WORKERS_VALUE
+IMAGE_SCALE=IMAGE_SCALE_VALUE
 
 BASE_EXPERIMENT_NAME="ip_${IP_BANDS}_${MODEL}_gpu_${GPUS}_cl_${CL_LAMBDA}_ip_${INPUT_SIZE// /_}_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}"
 EXPERIMENT_NAME="${BASE_EXPERIMENT_NAME}"
 
+if [ $IMAGE_SCALE = 0.08 ]; then
+    EXPERIMENT_NAME="${BASE_EXPERIMENT_NAME}_scale_${IMAGE_SCALE}"
+fi
+
 # Check if directory exists and append suffix if needed
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/2"
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/4"
 mkdir -p OUTPUT_DIR
 SUFFIX_COUNT=1
 
@@ -56,25 +61,96 @@ done
 
 echo "Using experiment name: ${EXPERIMENT_NAME}"
 
+# sh distributed_train.sh $GPUS train_skeleton.py \
+#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+#     --dataset $DATASET \
+#     --model $MODEL \
+#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
+#     --cl-lambda $CL_LAMBDA \
+#     --opt sgd \
+#     -b $BATCH_SIZE \
+#     --epochs 90 \
+#     --lr $LR \
+#     --weight-decay 5e-4 \
+#     --sched step \
+#     --momentum 0.9 \
+#     --lr-cycle-decay 0.1 \
+#     --decay-epochs 30 \
+#     --warmup-epochs 0 \
+#     --hflip 0.5 \
+#     --scale 1.0 1.0 \
+#     --train-crop-mode rrc \
+#     --input-size $INPUT_SIZE \
+#     --experiment $EXPERIMENT_NAME \
+#     --output $OUTPUT_DIR
+
+# resnet 18
 sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset $DATASET \
     --model $MODEL \
     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
-    --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b $BATCH_SIZE \
     --epochs 90 \
-    --lr $LR \
-    --weight-decay 5e-4 \
+    --lr 0.1 \
+    --weight-decay 1e-4 \
     --sched step \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
     --decay-epochs 30 \
-    --warmup-epochs 0 \
+    --warmup-epochs 5 \
     --hflip 0.5 \
-    --scale 1.0 1.0 \
+    --scale $IMAGE_SCALE 1.0 \
     --train-crop-mode rrc \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
-    --output $OUTPUT_DIR
+    --output $OUTPUT_DIR \
+    --workers $WORKERS
+
+# # alexnet
+# sh distributed_train.sh $GPUS train_skeleton.py \
+#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+#     --dataset $DATASET \
+#     --model $MODEL \
+#     --model-kwargs ip_scale_bands=$IP_BANDS \
+#     --opt sgd \
+#     -b 128 \
+#     --epochs 90 \
+#     --lr 0.01 \
+#     --weight-decay 5e-4 \
+#     --sched step \
+#     --decay-epochs 30 \
+#     --decay-rate 0.1 \
+#     --lr-cycle-decay 0.1 \
+#     --momentum 0.9 \
+#     --warmup-epochs 0 \
+#     --hflip 0.5 \
+#     --scale 0.08 1.0 \
+#     --train-crop-mode rrc \
+#     --input-size $INPUT_SIZE \
+#     --experiment $EXPERIMENT_NAME \
+#     --output $OUTPUT_DIR
+
+# vgg
+# sh distributed_train.sh $GPUS train_skeleton.py \
+#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+#     --dataset $DATASET \
+#     --model $MODEL \
+#     --model-kwargs ip_scale_bands=$IP_BANDS \
+#     --opt sgd \
+#     -b 32 \
+#     --epochs 90 \
+#     --lr 0.1 \
+#     --weight-decay 5e-4 \
+#     --sched step \
+#     --momentum 0.9 \
+#     --lr-cycle-decay 0.1 \
+#     --decay-epochs 30 \
+#     --warmup-epochs 5 \
+#     --hflip 0.5 \
+#     --scale 1.0 1.0 \
+#     --train-crop-mode rrc \
+#     --input-size $INPUT_SIZE \
+#     --experiment $EXPERIMENT_NAME \
+#     --output $OUTPUT_DIR

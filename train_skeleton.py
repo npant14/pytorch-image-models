@@ -655,6 +655,7 @@ def main():
         else:
             if utils.is_primary(args):
                 _logger.info("Using native Torch DistributedDataParallel.")
+                _logger.info(f"ip scale bands {args.model_kwargs['ip_scale_bands']}")
             if args.model_kwargs['ip_scale_bands'] == 1:
                 model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb,find_unused_parameters=True)
             else:
@@ -1101,6 +1102,11 @@ def train_one_epoch(
                     output = model(input)
                     loss = loss_fn(output, target)
             except:
+                if model.contrastive_loss:
+                    # pdb.set_trace()
+                    output, scale_loss = model(input)
+                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+                else:
                     output = model(input)
                     loss = loss_fn(output, target)
 

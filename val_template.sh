@@ -42,7 +42,7 @@ fi
 if [ "CKPT_DIR_VALUE" != "" ]; then
     CHECKPOINT_PATH="CKPT_DIR_VALUE/${MODEL_PTH_USED}.pth.tar"
 else
-    CHECKPOINT_PATH="/oscar/data/tserre/xyu110/pytorch-output/train/1/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}/${MODEL_PTH_USED}.pth.tar"
+    CHECKPOINT_PATH="/oscar/data/tserre/xyu110/pytorch-output/train/2/ip_${IP_BANDS}_${MODEL}_gpu_8_cl_${CL_LAMBDA}_ip_3_322_322_${CLASSIFIER_INPUT_SIZE}_c1[_6,3,1_]${BYPASS_STR}/${MODEL_PTH_USED}.pth.tar"
 fi
 
 mkdir -p $RESULTS_DIR

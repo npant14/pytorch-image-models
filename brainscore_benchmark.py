@@ -19,8 +19,7 @@ from collections import OrderedDict
 
 print(sys.path)
 
-import brainscore
-from brainscore.benchmarks.public_benchmarks import MajajHongITPublicBenchmark
+from brainscore_vision import load_benchmark
 import rsatoolbox
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,9 +28,7 @@ class Brainscore_Experiment():
         self.model = model
         self.outdir = outdir
         self.device = device
-        self.benchmark = MajajHongITPublicBenchmark()
-
-
+        self.benchmark = load_benchmark('MajajHong2015public.IT-pls')
 
     # '''
     # Expecting Input to be of the shape --> Catxnum_samplesxfeat_len
@@ -361,6 +358,7 @@ class Brainscore_Experiment():
         # Change Path into own folder
         fig.savefig(os.path.join(job_dir, "rdm_correlation_plot.png"), dpi=199)
 
+import pdb
 
 class Test(object):
     #TODO: Figure out what can be deleted from here
@@ -372,17 +370,52 @@ class Test(object):
         self.loss = self.loss.to(device)
         self.feats = {}
 
-    def getActivation(self,name):
+    def getActivation(self, name):
         # the hook signature
+        print(name)
         def hook(model, input, output):
             batch = output
             if type(batch) == list:
-                batch = torch.stack(batch)
+                # Get the max dimensions across all tensors in the batch
+                max_h = max([b.shape[-2] for b in batch])
+                max_w = max([b.shape[-1] for b in batch])
+            
+                # Pad and resize each tensor to match the max dimensions
+                padded_batch = []
+                for tensor in batch:
+                    # Calculate padding needed for each tensor
+                    pad_h = max_h - tensor.shape[-2]
+                    pad_w = max_w - tensor.shape[-1]
+                    
+                    # Apply padding (evenly on both sides)
+                    pad_h_1, pad_h_2 = pad_h // 2, pad_h - (pad_h // 2)
+                    pad_w_1, pad_w_2 = pad_w // 2, pad_w - (pad_w // 2)
+                    padded = nn.functional.pad(tensor, (pad_w_1, pad_w_2, pad_h_1, pad_h_2), mode='constant', value=0)
+                    
+                    padded_batch.append(padded)
+                    
+                # Now stack the padded tensors
+                batch = torch.stack(padded_batch)
+            
             if name in self.feats:
                 self.feats[name].append(batch.detach())
             else:
                 self.feats[name] = [batch.detach()]
-        return hook   
+        return hook
+
+    # def getActivation(self, name):
+    #     # the hook signature
+    #     print(name)
+    #     def hook(model, input, output):
+    #         batch = output
+    #         if type(batch) == list:
+    #             pdb.set_trace()
+    #             batch = torch.stack(batch)
+    #         if name in self.feats:
+    #             self.feats[name].append(batch.detach())
+    #         else:
+    #             self.feats[name] = [batch.detach()]
+    #     return hook   
 ###########################################################################
 
     def __call__(self):
@@ -400,12 +433,10 @@ class Test(object):
         record['dur'] = (time.time() - start) / len(self.data_loader)
 
         return record
-
+    
 
 if __name__ == '__main__':
 
     print("running main")
-    # Test Cases
-    
     
 

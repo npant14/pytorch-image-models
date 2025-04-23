@@ -21,11 +21,21 @@
 # resmax_v2
 # ./submit_job.sh resmax_v2 1 0 6400 8 128 False "48:00:00"
 # ./submit_job.sh resmax_v2 1 0 15616 8 128 True "72:00:00"
-# ./submit_job.sh resmax_v2 3 0 9216 1 64 False "48:00:00"
+./submit_job.sh contrastive_resmaxv1 3 0.1 18432 1 32 True "local" 0.01 gpu
+# ./submit_job.sh resmax_v2 3 0 9216 1 64 Falsec "48:00:00"
 # ./submit_job.sh resmax_v2 3 0 18432 8 64 True "72:00:00"
 
+# ./submit_job.sh alexnet 0 0 0 2 128 False "72:00:00" 0.01 gpu-he
+# ./submit_job.sh alexnet_nopool 0 0 0 2 128 False "72:00:00" 0.01 gpu-he
 
-
+./submit_job.sh resnet18 0 0 512 8 32 False "48:00:00" 0.1 gpu
+./submit_job.sh resnet18 0 0 512 8 32 False "48:00:00" 0.1 gpu 0.08 227
+./submit_job.sh resmax_v3 1 0 512 8 32 False "72:00:00" 0.1 gpu
+./submit_job.sh resmax_v3 1 0 512 8 32 True "72:00:00" 0.1 gpu
+./submit_job.sh resmax_v3 3 0 512 8 32 False "72:00:00" 0.1 gpu
+# ./submit_job.sh resnet18 0 0 512 1 256 False "48:00:00"
+# ./submit_job.sh vgg11 0 0 512 8 32 False "48:00:00"
+# ./submit_job.sh vgg11 0 0 512 1 256 False "48:00:00"
 # ./submit_job.sh resmax_v3 1 0 512 8 128 False "48:00:00"
 # ./submit_job.sh resmax_v3 3 0 512 8 64 False "48:00:00"
 
@@ -33,15 +43,19 @@
 # ./submit_job.sh contrastive_resmaxv1 3 0.5 9216 8 32 False "96:00:00" 0.0001 
 # ./submit_job.sh contrastive_resmaxv1 3 1 9216 8 32 False "96:00:00" 0.0001 
 
+# ./submit_job.sh chresmax_v4 3 0.1 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v4 3 0.5 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v4 3 1 9216 8 32 False "120:00:00"
+
 # val parameters: model_name, ip_bands, cl_lambda, cls_input_size, gpus, batch_size, bypass, time (or local), ckpt_dir, results_dir
 
-IMAGE_SCALE_LIST="160 192 227 270 322 382 454"
+# IMAGE_SCALE_LIST="160 192 227 270 322 382 454"
 
-for CL in 0.1 0.5 1
-do
-    ./val_job.sh contrastive_resmaxv1 3 $CL 9216 1 128 False "$IMAGE_SCALE_LIST" "local"
-    wait
-done
+# for CL in 0.1 0.5 1
+# do
+#     ./val_job.sh contrastive_resmaxv1 3 $CL 9216 1 128 False "$IMAGE_SCALE_LIST" "local"
+#     wait
+# done
 
 # for CL in 0.1 0.5 1
 # do
