@@ -1089,23 +1089,23 @@ def train_one_epoch(
         # data_time_m.update(accum_steps * (time.time() - data_start_time))
 
         def _forward():
-            # with amp_autocast():
             scale_loss = 0
             try:
-                if model.module.contrastive_loss:
-                    # pdb.set_trace()
+                is_cl = getattr(model.module if hasattr(model, 'module') else model, 'contrastive_loss', False)
+
+                if is_cl:
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
-                    # print(scale_loss)
-            # default normal model behavior
-                else: 
+                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
+                else:
                     output = model(input)
                     loss = loss_fn(output, target)
-            except:
-                if model.contrastive_loss:
-                    # pdb.set_trace()
+            
+            except Exception as e:
+                # fallback, rare edge case
+                is_cl = getattr(model, 'contrastive_loss', False)
+                if is_cl:
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
                 else:
                     output = model(input)
                     loss = loss_fn(output, target)

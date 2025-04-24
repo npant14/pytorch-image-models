@@ -34,7 +34,7 @@ from timm.utils import accuracy, AverageMeter, natural_key, setup_default_loggin
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
 
 from pad import *
-from brainscore_benchmark import Brainscore_Experiment
+# from brainscore_benchmark import Brainscore_Experiment
 
 try:
     from apex import amp

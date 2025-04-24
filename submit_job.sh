@@ -30,7 +30,7 @@ mkdir -p job_scripts
 temp_script="job_scripts/job_${job_name}.sh"
 cp submit_template.sh $temp_script
 
-cpu_per_gpu=2
+cpu_per_gpu=1
 cpus=$((gpus * cpu_per_gpu))
 
 mem_per_gpu=32

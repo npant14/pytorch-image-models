@@ -12,6 +12,7 @@ image_scales=${8:-"322"}  # Default is a single scale, but can now take a list l
 time_limit=${9:-"3:00:00"}  # Default: 3 hours or "local"
 ckpt_dir=${10:-""}
 results_dir=${11:-"/oscar/data/tserre/xyu110/pytorch-output/validation"}
+cpus=${12:-8}  # Default: 1 CPU
 
 # Process the image_scales parameter
 # If it contains spaces, it's a list of scales to loop through
@@ -59,6 +60,7 @@ for image_scale in "${scales[@]}"; do
     sed -i "s|RESULTS_DIR_VALUE|${results_dir}|g" $temp_script
     sed -i "s/IMAGE_SCALE_VALUE/${image_scale}/g" $temp_script
     sed -i "s|CKPT_DIR_VALUE|${ckpt_dir}|g" $temp_script
+    sed -i "s/CPU_VALUE/${gpus}/g" $temp_script
 
     # Run based on the mode
     if [ $time_limit = "local" ]; then

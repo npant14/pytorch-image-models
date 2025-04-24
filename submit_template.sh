@@ -85,30 +85,30 @@ echo "Using experiment name: ${EXPERIMENT_NAME}"
 #     --output $OUTPUT_DIR
 
 # resnet 18
-sh distributed_train.sh $GPUS train_skeleton.py \
-    --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-    --dataset $DATASET \
-    --model $MODEL \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
-    --opt sgd \
-    -b $BATCH_SIZE \
-    --epochs 90 \
-    --lr 0.1 \
-    --weight-decay 1e-4 \
-    --sched step \
-    --momentum 0.9 \
-    --lr-cycle-decay 0.1 \
-    --decay-epochs 30 \
-    --warmup-epochs 5 \
-    --hflip 0.5 \
-    --scale $IMAGE_SCALE 1.0 \
-    --train-crop-mode rrc \
-    --input-size $INPUT_SIZE \
-    --experiment $EXPERIMENT_NAME \
-    --output $OUTPUT_DIR \
-    --workers $WORKERS
+# sh distributed_train.sh $GPUS train_skeleton.py \
+#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+#     --dataset $DATASET \
+#     --model $MODEL \
+#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
+#     --opt sgd \
+#     -b $BATCH_SIZE \
+#     --epochs 90 \
+#     --lr 0.1 \
+#     --weight-decay 1e-4 \
+#     --sched step \
+#     --momentum 0.9 \
+#     --lr-cycle-decay 0.1 \
+#     --decay-epochs 30 \
+#     --warmup-epochs 5 \
+#     --hflip 0.5 \
+#     --scale $IMAGE_SCALE 1.0 \
+#     --train-crop-mode rrc \
+#     --input-size $INPUT_SIZE \
+#     --experiment $EXPERIMENT_NAME \
+#     --output $OUTPUT_DIR \
+#     --workers $WORKERS
 
-# # alexnet
+# alexnet
 # sh distributed_train.sh $GPUS train_skeleton.py \
 #     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
 #     --dataset $DATASET \
@@ -126,31 +126,31 @@ sh distributed_train.sh $GPUS train_skeleton.py \
 #     --momentum 0.9 \
 #     --warmup-epochs 0 \
 #     --hflip 0.5 \
-#     --scale 0.08 1.0 \
+#     --scale $IMAGE_SCALE 1.0 \
 #     --train-crop-mode rrc \
 #     --input-size $INPUT_SIZE \
 #     --experiment $EXPERIMENT_NAME \
 #     --output $OUTPUT_DIR
 
 # vgg
-# sh distributed_train.sh $GPUS train_skeleton.py \
-#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-#     --dataset $DATASET \
-#     --model $MODEL \
-#     --model-kwargs ip_scale_bands=$IP_BANDS \
-#     --opt sgd \
-#     -b 32 \
-#     --epochs 90 \
-#     --lr 0.1 \
-#     --weight-decay 5e-4 \
-#     --sched step \
-#     --momentum 0.9 \
-#     --lr-cycle-decay 0.1 \
-#     --decay-epochs 30 \
-#     --warmup-epochs 5 \
-#     --hflip 0.5 \
-#     --scale 1.0 1.0 \
-#     --train-crop-mode rrc \
-#     --input-size $INPUT_SIZE \
-#     --experiment $EXPERIMENT_NAME \
-#     --output $OUTPUT_DIR
+sh distributed_train.sh $GPUS train_skeleton.py \
+    --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+    --dataset $DATASET \
+    --model $MODEL \
+    --model-kwargs ip_scale_bands=$IP_BANDS \
+    --opt sgd \
+    -b 32 \
+    --epochs 90 \
+    --lr 0.1 \
+    --weight-decay 5e-4 \
+    --sched step \
+    --momentum 0.9 \
+    --lr-cycle-decay 0.1 \
+    --decay-epochs 30 \
+    --warmup-epochs 5 \
+    --hflip 0.5 \
+    --scale $IMAGE_SCALE 1.0 \
+    --train-crop-mode rrc \
+    --input-size $INPUT_SIZE \
+    --experiment $EXPERIMENT_NAME \
+    --output $OUTPUT_DIR

@@ -335,17 +335,19 @@ class Residual1(nn.Module):
         if strides > 1 or in_channels != out_channels:
             self.conv3 = nn.Conv2d(in_channels, out_channels,
                                    kernel_size=1, stride=strides, bias=False)
+            self.bn3 = nn.BatchNorm2d(out_channels)
         else:
             self.conv3 = None
+            self.bn3 = None
 
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.bn2 = nn.BatchNorm2d(out_channels)
-        self.bn3 = nn.BatchNorm2d(out_channels)
+        
 
     def forward(self, X):
         Y = F.relu(self.bn1(self.conv1(X)))
         Y = self.bn2(self.conv2(Y))
-        if self.conv3:
+        if self.conv3 is not None and self.bn3 is not None:
             X = self.bn3(self.conv3(X))
         Y += X
         return F.relu(Y)
@@ -504,7 +506,7 @@ class RESMAX_V3(nn.Module):
         else:
             return [x]
 
-    def forward(self, x, pyramid=False):
+    def forward(self, x):
         def apply(module, x):
             return [module(xi) for xi in x] if isinstance(x, list) else module(x)
 
@@ -941,6 +943,133 @@ class CHRESMAX_V4(nn.Module):
                             
         return out1, total_loss
     
+class CHRESMAX_V5(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+
+    In V4, we use new loss clip loss. also use reflect for padding
+    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+    the returned features are [0] for C1 and C2.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=512,
+                 contrastive_loss=True,
+                 bypass=False,
+                 temperature=0.1,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        self.temperature = temperature
+        
+        # Use the optimized backbone
+        self.backbone = RESMAX_V3(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        
+        # Original input - full forward pass
+        if self.backbone.bypass:
+            out1, c1_feats1, c2_feats1, bypass1 = self.backbone(x)
+        else:
+            out1, c1_feats1, c2_feats1 = self.backbone(x)
+        
+        # Randomly scaled input
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            # 'constant', 'reflect', 'replicate' or 'circular'. Default: 'constant'
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw), mode='reflect')
+        else:
+            # center-crop if bigger
+            center_crop = transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+            
+        # Forward pass on scaled input
+        if self.backbone.bypass:
+            out2, c1_feats2, c2_feats2, bypass2 = self.backbone(x_rescaled)
+        else:
+            out2, c1_feats2, c2_feats2 = self.backbone(x_rescaled)
+
+
+        def clip_style_loss(z1, z2, temperature=self.temperature):
+            """
+            CLIP-style contrastive loss between original and scaled features.
+            - z1: features from original images [B, D]
+            - z2: features from rescaled images [B, D]
+            """
+            # Normalize
+            z1 = F.normalize(z1, dim=1)  # [B, D]
+            z2 = F.normalize(z2, dim=1)  # [B, D]
+
+            # Compute logits
+            logits_per_orig = torch.matmul(z1, z2.T) / temperature  # [B, B]
+            logits_per_scaled = torch.matmul(z2, z1.T) / temperature  # [B, B]
+
+            # Labels are indices [0, 1, ..., B-1]
+            labels = torch.arange(z1.size(0), device=z1.device)
+
+            loss_orig = F.cross_entropy(logits_per_orig, labels)
+            loss_scaled = F.cross_entropy(logits_per_scaled, labels)
+
+            return (loss_orig + loss_scaled) / 2
+        
+        # Compute CLIP-style contrastive loss between features
+        if isinstance(c1_feats1, list) and isinstance(c1_feats2, list):
+            c1_contrastive_loss = 0
+            for i in range(len(c1_feats1)):
+                f1 = c1_feats1[i].reshape(c1_feats1[i].size(0), -1)
+                f2 = c1_feats2[i].reshape(c1_feats2[i].size(0), -1)
+                c1_contrastive_loss += clip_style_loss(f1, f2)
+            c1_contrastive_loss /= len(c1_feats1)
+        else:
+            f1 = c1_feats1.reshape(c1_feats1.size(0), -1)
+            f2 = c1_feats2.reshape(c2_feats2.size(0), -1)
+            c1_contrastive_loss = clip_style_loss(f1, f2)
+
+        if isinstance(c2_feats1, list) and isinstance(c2_feats2, list):
+            c2_contrastive_loss = 0
+            for i in range(len(c2_feats1)):
+                f1 = c2_feats1[i].reshape(c2_feats1[i].size(0), -1)
+                f2 = c2_feats2[i].reshape(c2_feats2[i].size(0), -1)
+                c2_contrastive_loss += clip_style_loss(f1, f2)
+            c2_contrastive_loss /= len(c2_feats1)
+        else:
+            f1 = c2_feats1.reshape(c2_feats1.size(0), -1)
+            f2 = c2_feats2.reshape(c2_feats2.size(0), -1)
+            c2_contrastive_loss = clip_style_loss(f1, f2)
+
+        # Top-level output loss
+        out_contrastive_loss = clip_style_loss(out1, out2)
+
+        # Optional: bypass contrastive
+        if self.backbone.bypass:
+            bypass_contrastive_loss = clip_style_loss(bypass1.reshape(bypass1.size(0), -1), bypass2.reshape(bypass2.size(0), -1))
+            total_loss = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss + 0.1 * bypass_contrastive_loss
+        else:
+            total_loss = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss
+
+
+        return out1, total_loss
 
 # Create a new model for contrastive fine-tuning
 class ContrastiveRESMAX(nn.Module):
@@ -1311,7 +1440,6 @@ def resmax_v3(pretrained=False, **kwargs):
     return model
 
 
-
 @register_model
 def chresmax_v3(pretrained=False, **kwargs):
     """
@@ -1342,6 +1470,20 @@ def chresmax_v4(pretrained=False, **kwargs):
     model = CHRESMAX_V4(**kwargs)
     return model
 
+@register_model
+def chresmax_v5(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V5(**kwargs)
+    return model
 
 @register_model
 def contrastive_resmax(pretrained=False, **kwargs):
