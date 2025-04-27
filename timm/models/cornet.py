@@ -67,7 +67,7 @@ class CORblock_S(nn.Module):
     def forward(self, inp):
         x = self.conv_input(inp)
 
-        for t in range(self.times):
+        for t in range(max(1, self.times)):
             if t == 0:
                 skip = self.norm_skip(self.skip(x))
                 self.conv2.stride = (2, 2)
@@ -216,7 +216,7 @@ def cornet_s(pretrained=False, **kwargs):
         pass
     if pretrained:
        raise ValueError("No pretrained model available for CORnet_S")
-    model = CORnet_S()
+    model = CORnet_S(**kwargs)
     return model
 
 @register_model

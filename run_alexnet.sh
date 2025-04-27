@@ -17,9 +17,9 @@ module load cuda
 
 
 
-V2_iterations=2
-V4_iterations=4
-IT_iterations=2
+V2_iterations=1
+V4_iterations=1
+IT_iterations=1
 IM_SIZE=322
 sh distributed_train.sh 2 train_skeleton.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
@@ -36,11 +36,11 @@ sh distributed_train.sh 2 train_skeleton.py \
     --lr-cycle-decay 0.1 \
     --decay-epochs 30 \
     --warmup-epochs 0 \
-    --start-epoch 0 \
+    --start-epoch 9 \
     --hflip 0.5\
     --train-crop-mode rrc\
     --input-size 3 322 322\
     --scale 1.0 1.0 \
-    #--initial-checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/cornet_s_debug_322_0_0_0_0/last.pth.tar \
-    --experiment cornet_s_debug_${IM_SIZE}_${V2_iterations}_${V4_iterations}_${IT_iterations} \
+    --initial-checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/cornet_s_debug2_322_1_1_1/checkpoint-8.pth.tar \
+    --experiment cornet_s_debug2_${IM_SIZE}_${V2_iterations}_${V4_iterations}_${IT_iterations} \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/ \

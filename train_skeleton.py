@@ -915,6 +915,7 @@ def main():
     
     results = []
     original_stdout = sys.stdout
+    
     try:
         for epoch in range(start_epoch, num_epochs):
             if hasattr(dataset_train, 'set_epoch'):

@@ -238,7 +238,7 @@ def validate(args):
 
     if args.reparam:
         model = reparameterize_model(model)
-
+    
     param_count = sum([m.numel() for m in model.parameters()])
     _logger.info('Model %s created, param count: %d' % (args.model, param_count))
 
