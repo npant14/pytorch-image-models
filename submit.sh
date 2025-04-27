@@ -1,30 +1,81 @@
 #!/bin/bash
 
-# parameters: model_name, ip_bands, cl_lambda, cls_input_size, gpus, batch_size, bypass, time
+# train parameters: model_name, ip_bands, cl_lambda, cls_input_size, gpus, batch_size, bypass, time, lr
 
-# chresmax_v2
-# ./submit_job.sh chresmax_v2 3 0 9216 8 32 False "120:00:00"
-# ./submit_job.sh chresmax_v2 3 0 18432 8 32 True "120:00:00"
-./submit_job.sh chresmax_v2 3 1 9216 8 32 False "120:00:00"
-./submit_job.sh chresmax_v2 3 1 18432 8 32 True "144:00:00"
+# chresmax_v3
+# ./submit_job.sh chresmax_v3 3 0 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v3 3 0.1 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v3 3 0.5 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v3 3 1 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v3 3 0 18432 8 32 True "144:00:00"
+# ./submit_job.sh chresmax_v3 3 0.1 18432 8 32 True "144:00:00"
+# ./submit_job.sh chresmax_v3 3 0.5 18432 8 32 True "144:00:00"
+# ./submit_job.sh chresmax_v3 3 1 18432 8 32 True "144:00:00"
+
+# ./submit_job.sh contrastive_resmax 3 0.1 9216 8 32 False "96:00:00"
+# ./submit_job.sh contrastive_resmax 3 0.5 9216 8 32 False "96:00:00"
+# ./submit_job.sh contrastive_resmax 3 1 9216 8 32 False "96:00:00"
+# ./submit_job.sh contrastive_resmax 3 1 18432 8 32 True "120:00:00"
+
 
 # resmax_v2
 # ./submit_job.sh resmax_v2 1 0 6400 8 128 False "48:00:00"
 # ./submit_job.sh resmax_v2 1 0 15616 8 128 True "72:00:00"
-# ./submit_job.sh resmax_v2 3 0 9216 8 64 False "48:00:00"
+# ./submit_job.sh contrastive_resmaxv1 3 0.1 18432 1 32 True "local" 0.01 gpu
+# ./submit_job.sh resmax_v2 3 0 9216 1 64 Falsec "48:00:00"
 # ./submit_job.sh resmax_v2 3 0 18432 8 64 True "72:00:00"
 
-# for imgscale in 160 192 227 270 322 382 454
+# ./submit_job.sh alexnet 0 0 0 2 128 False "72:00:00" 0.01 gpu-he 0.08
+# ./submit_job.sh alexnet_nopool 0 0 0 2 128 False "72:00:00" 0.01 gpu-he 1.0
+# ./submit_job.sh resnet18 0 0 512 8 32 False "48:00:00" 0.1 gpu
+# ./submit_job.sh resnet18 0 0 512 8 32 False "48:00:00" 0.1 gpu 1.0 227
+# ./submit_job.sh resmax_v3 1 0 512 8 32 False "72:00:00" 0.1 gpu
+# ./submit_job.sh resmax_v3 1 0 512 8 32 True "72:00:00" 0.1 gpu 0.08
+# ./submit_job.sh resmax_v3 3 0 512 8 32 False "72:00:00" 0.1 gpu 0.08
+# ./submit_job.sh resmax_v3 3 0 512 8 32 True "96:00:00" 0.1 gpu 0.08
+# ./submit_job.sh vgg11 0 0 512 8 32 False "96:00:00" 0.1 gpu 0.08 227
+# ./submit_job.sh vgg11 0 0 512 1 256 False "48:00:00"
+# ./submit_job.sh chresmax_v5 3 0.1 512 8 32 False "48:00:00" 0.1 gpu 0.08
+# ./submit_job.sh chresmax_v5 3 0.1 512 8 32 True "48:00:00" 0.1 gpu 0.08
+
+# ./submit_job.sh contrastive_resmaxv1 3 0.1 9216 8 32 False "96:00:00" 0.0001 
+# ./submit_job.sh contrastive_resmaxv1 3 0.5 9216 8 32 False "96:00:00" 0.0001 
+# ./submit_job.sh contrastive_resmaxv1 3 1 9216 8 32 False "96:00:00" 0.0001 
+
+# ./submit_job.sh chresmax_v4 3 0.1 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v4 3 0.5 9216 8 32 False "120:00:00"
+# ./submit_job.sh chresmax_v4 3 1 9216 8 32 False "120:00:00"
+
+# val parameters: model_name, ip_bands, cl_lambda, cls_input_size, gpus, batch_size, bypass, time (or local), ckpt_dir, results_dir
+
+IMAGE_SCALE_LIST="160 192 227 270 322 382 454"
+
+# for CL in 0.1 0.5 1
 # do
-#     # ./val_job.sh resmax_v2 3 0 9216 2 32 False $imgscale "1:00:00"
-#     # ./val_job.sh resmax_v2 1 0 6400 2 64 False $imgscale "1:00:00"
-#     # ./val_job.sh resmax_v2 3 0 18432 2 32 True $imgscale "1:00:00"
-#     # ./val_job.sh resmax_v2 1 0 15616 2 64 True $imgscale "1:00:00"
-#     # ./val_job.sh chresmax_v2 3 0 9216 2 32 False $imgscale "1:00:00"
-#     # ./val_job.sh chresmax_v2 3 0 18432 2 32 True $imgscale "1:00:00"
-#     # ./val_job.sh chresmax_v2 3 1 9216 2 32 False $imgscale "1:00:00"
-#     # ./val_job.sh chresmax_v2 3 1 18432 2 32 True $imgscale "1:00:00"
-#     ./val_job.sh chresmax_v2 3 1 18432 2 32 True $imgscale "1:00:00"
+#     ./val_job.sh contrastive_resmaxv1 3 $CL 9216 1 128 False "$IMAGE_SCALE_LIST" "local"
+#     wait
 # done
 
-# ./val_job.sh resmax_v2 3 0 9216 2 32 False 322 "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/validation" "local"
+for CL in 0.1 0.5 1
+do
+    ./val_job.sh chresmax_v4 3 $CL 9216 1 64 False "$IMAGE_SCALE_LIST" "local"
+    wait
+done
+
+# for CL in 0.1 0.5 1
+# do
+#     ./val_job.sh chresmax_v3 3 $CL 18432 1 32 True "$IMAGE_SCALE_LIST" "local"
+#     wait
+# done
+
+    
+
+# ./val_job.sh vggmax_v1 3 0 20736 1 32 True "160 192 227 270 322 382 454" "local" "/oscar/data/tserre/xyu110/pytorch-output/train/others/batch_size_128/ip_3_vggmax_v1_gpu_8_cl_0_ip_3_322_322_20736_c1[_6,3,1_]"
+# ./val_job.sh alexnet 0 0 16384 1 32 False "160 192 227 270 321 382 454" "local" "/oscar/data/tserre/xyu110/pytorch-output/train/alexnets/alexnet_size_321"
+# ./val_job.sh alexnet 0 0 9216 1 128 False "160 192 227 270 321 382 454" "local" "/oscar/data/tserre/xyu110/pytorch-output/train/alexnets/alexnet_size_227"
+
+# ./val_job.sh alexnet 0 0 16384 1 32 False "160 192 227 270 321 382 454" "local" "/oscar/data/tserre/xyu110/pytorch-output/train/alexnets/alexnet_size_321_scale_0.08"
+
+# ./val_job.sh chresmax_v3 3 0.5 18432 1 32 True "454" "local"
+
+# ./val_job.sh chresmax_v3 3 0.1 18432 1 32 True "454" "local" "/oscar/data/tserre/xyu110/pytorch-output/train/2/ip_3_chresmax_v3_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass"

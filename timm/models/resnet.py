@@ -407,6 +407,7 @@ class ResNet(nn.Module):
             drop_block_rate: float = 0.,
             zero_init_last: bool = True,
             block_args: Optional[Dict[str, Any]] = None,
+            **kwargs,
     ):
         """
         Args:

@@ -655,8 +655,11 @@ def main():
         else:
             if utils.is_primary(args):
                 _logger.info("Using native Torch DistributedDataParallel.")
-            model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
-                            #   ,find_unused_parameters=True)
+                _logger.info(f"ip scale bands {args.model_kwargs['ip_scale_bands']}")
+            if args.model_kwargs['ip_scale_bands'] == 1:
+                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb,find_unused_parameters=True)
+            else:
+                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
         # NOTE: EMA model does not need to be wrapped by DDP
 
     # if args.torchcompile:
@@ -1023,6 +1026,7 @@ def main():
         _logger.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
     print(f'--result\n{json.dumps(results, indent=4)}')
 
+import pdb
 
 def train_one_epoch(
         epoch,
@@ -1088,14 +1092,13 @@ def train_one_epoch(
         # data_time_m.update(accum_steps * (time.time() - data_start_time))
 
         def _forward():
-            # with amp_autocast():
+            scale_loss = 0
             try:
                 if model.module.contrastive_loss:
                     
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
-            # default normal model behavior
-                else: 
+                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
+                else:
                     output = model(input)
                     loss = loss_fn(output, target)
             except Exception as e:
@@ -1109,7 +1112,7 @@ def train_one_epoch(
 
             # if accum_steps > 1:
             #     loss /= accum_steps
-            return loss
+            return loss, scale_loss
 
         def _backward(_loss):
             # if loss_scaler is not None:
@@ -1139,7 +1142,7 @@ def train_one_epoch(
         #         _backward(loss)
         # else:
 
-        loss = _forward()
+        loss, scale_loss = _forward()
         _backward(loss)
 
         running_loss += loss.item()
@@ -1183,6 +1186,7 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
+                    # f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
                     # f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
                     # f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
                     f'LR: {lr:.3e}  '

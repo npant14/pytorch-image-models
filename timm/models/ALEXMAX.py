@@ -24,7 +24,7 @@ def check_for_nans(tensor, name):
         print(f"NaNs found in {name}")
 
 class S1_old(nn.Module):
-    def __init__(self,kernel_size=11, stride=4, padding=0):
+    def __init__(self, kernel_size=11, stride=4, padding=0):
         super(S1_old, self).__init__()
 
         self.layer1 = nn.Sequential(

@@ -151,6 +151,145 @@ class C_scoring2_optimized(nn.Module):
             del scores, feats
 
         return out_feats
+    
+
+class C_scoring2_optimized_debug(nn.Module):
+    """
+    Memory-optimized version of the C_scoring2 layer:
+      - Processes each scale (or scale-pair) in a loop rather than concatenating
+        all scales at once.
+      - Uses in-place ops when possible.
+      - Explicitly deletes intermediate tensors to reduce peak memory usage.
+
+    Args:
+        num_channels (int): Number of input channels.
+        pool_func1 (nn.Module): Pooling function for the first input (e.g. nn.MaxPool2d).
+        pool_func2 (nn.Module): Pooling function for the second input.
+        resize_kernel_1 (int): First resizing conv kernel size.
+        resize_kernel_2 (int): Second resizing conv kernel size.
+        skip (int): Skip step for iterating over scales.
+        global_scale_pool (bool): Whether to use global scale pooling or not.
+    """
+    def __init__(
+        self,
+        num_channels,
+        pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+        pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+        resize_kernel_1=1,
+        resize_kernel_2=3,
+        skip=1,
+        global_scale_pool=False
+    ):
+        super().__init__()
+        self.pool1 = pool_func1
+        self.pool2 = pool_func2
+        self.global_scale_pool = global_scale_pool
+        self.num_channels = num_channels
+        self.scoring_conv = ConvScoring(num_channels)
+        self.skip = skip
+        
+        # Learnable resizing layers (with in-place ReLU)
+        self.resizing_layers = nn.Sequential(
+            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_2, padding=1),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x_pyramid):
+        """
+        x_pyramid: list of tensors, each [N, C, Hi, Wi].
+
+        Returns:
+            - If global_scale_pool=True, returns a single feature map [N, C, H', W'].
+            - Otherwise, returns a list of feature maps [N, C, H', W'] (one per scale pair).
+        """
+        # ----------------------------------------------------------------
+        # Global-scale pooling path
+        # ----------------------------------------------------------------
+        # import pdb; pdb.set_trace()
+        if self.global_scale_pool:
+            # If only one scale, trivial path
+            if len(x_pyramid) == 1:
+                pooled = self.pool1(x_pyramid[0])
+                # Just run scoring_conv so it’s in the graph
+                _ = self.scoring_conv(pooled)
+                return pooled
+
+            # Gather a list of pooled outputs
+            out_list = [self.pool1(x) for x in x_pyramid]
+
+            # We'll iteratively soft-select from out_list[0] through out_list[-1]
+            out_ref = out_list[0]
+            final_size = out_list[len(out_list)//2].shape[-2:]  # pick a reference size
+
+            for i in range(1, len(out_list)):
+                tmp = F.interpolate(out_list[i], final_size, mode='bilinear', align_corners=False)
+                tmp = self.resizing_layers(tmp)
+                
+                # Score each
+                score_out_ref = self.scoring_conv(out_ref)
+                score_tmp = self.scoring_conv(tmp)
+                
+                # Soft selection
+                scores = torch.stack([score_out_ref, score_tmp], dim=1)  # [N, 2, 1, H, W]
+                feats = torch.stack([out_ref, tmp], dim=1)               # [N, 2, C, H, W]
+
+                del tmp, score_out_ref, score_tmp  # free memory
+
+                out_ref = soft_selection(scores, feats)
+                del scores, feats
+
+            return out_ref
+
+        # ----------------------------------------------------------------
+        # Non-global path: pairwise scale merging
+        # ----------------------------------------------------------------
+        if len(x_pyramid) == 1:
+            # Single scale path
+            pooled = self.pool2(x_pyramid[0])
+            _ = self.scoring_conv(pooled)
+            return [pooled]
+
+        # 1) Pool all scales
+        pooled_1_list = [self.pool1(x) for x in x_pyramid]
+        pooled_2_list = [self.pool2(x) for x in x_pyramid]
+
+        # 2) Use the middle scale from pooled_2_list to define final_size
+        mid_idx = len(x_pyramid) // 2
+        final_size = pooled_2_list[mid_idx].shape[-2:]
+
+        # 3) Build pairs: (pooled_1_list[i], pooled_2_list[i+1]) stepping by self.skip
+        out_feats = []
+        debug = [0] * len(x_pyramid)
+        for i in range(0, len(x_pyramid) - 1, self.skip):
+            a = F.interpolate(pooled_1_list[i], size=final_size, mode='bilinear', align_corners=False)
+            b = F.interpolate(pooled_2_list[i + 1], size=final_size, mode='bilinear', align_corners=False)
+
+            a = self.resizing_layers(a)
+            b = self.resizing_layers(b)
+
+            score_a = self.scoring_conv(a)
+            score_b = self.scoring_conv(b)
+
+            # Soft selection
+            scores = torch.stack([score_a, score_b], dim=1)  # => [N, 2, 1, H', W']
+            feats = torch.stack([a, b], dim=1)               # => [N, 2, C, H', W']
+
+            score_softmax = F.softmax(scores, dim=1)
+            selection = score_softmax.argmax(dim=1)
+            selection_counts = torch.bincount(selection.flatten(), minlength=2)
+            debug[i] += selection_counts[0].item()
+            debug[i + 1] += selection_counts[1].item()
+
+            del a, b, score_a, score_b
+
+            out_feats.append(soft_selection(scores, feats))
+            del scores, feats
+
+        print(debug)
+
+        return out_feats
 
 # --------------------------------------------------
 # ALEXMAX_v3_3_optimized

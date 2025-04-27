@@ -9,10 +9,49 @@ from .registry import register_model
 __all__ = ["AlexNet", "alexnet"]
 
 class AlexNet(nn.Module):
+    def __init__(self, num_classes=1000, dropout=0.5, **kwargs) -> None:
+        super().__init__()
+        self.num_classes = num_classes
+        self.dropout = dropout
+        self.in_chans = 3
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=dropout),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+class AlexNet1(nn.Module):
     def __init__(self, num_classes=1000, in_chans=3, **kwargs):
         self.num_classes = num_classes
         self.in_chans = in_chans
-        super(AlexNet, self).__init__()
+        super(AlexNet1, self).__init__()
         self.layer1 = nn.Sequential(
             nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=0),
             nn.BatchNorm2d(96),
@@ -50,8 +89,11 @@ class AlexNet(nn.Module):
                         227: 9216,
                         270: 12544,
                         321: 16384,
+                        322: 16384,
                         382: 25600,
                         454: 43264}
+
+        print(f"Channel size: {kwargs['channel_size']}")
 
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
@@ -82,6 +124,14 @@ import torch.utils.model_zoo as model_zoo
 @register_model
 def alexnet(pretrained=False, **kwargs):
     model = AlexNet(**kwargs)
+    if pretrained:
+        pass
+        # model.load_state_dict(model_zoo.load_url("/oscar/home/npant1/data/npant1/alexnet-owt-7be5be79.pth"))
+    return model
+
+@register_model
+def alexnet_nopool(pretrained=False, **kwargs):
+    model = AlexNet1(**kwargs)
     if pretrained:
         pass
         # model.load_state_dict(model_zoo.load_url("/oscar/home/npant1/data/npant1/alexnet-owt-7be5be79.pth"))

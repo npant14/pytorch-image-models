@@ -77,6 +77,7 @@ class VGG(nn.Module):
             norm_layer: nn.Module = None,
             global_pool: str = 'avg',
             drop_rate: float = 0.,
+            **kwargs: Any,
     ) -> None:
         super(VGG, self).__init__()
         assert output_stride == 32

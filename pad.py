@@ -43,8 +43,7 @@ def pad_batch_random(images, target_size):
         padded_image = F.pad(
             images[i:i+1],
             (pad_left, pad_right, pad_top, pad_bottom),
-            mode='constant',
-            value=0
+            mode='reflect',
         )
         padded_images.append(padded_image)
     
@@ -67,7 +66,8 @@ def pad_batch(images, target_size):
     pad_right = pad_w - pad_left
 
     # Apply padding
-    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+    # Use reflection padding to avoid artifacts, or constant for default
+    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='reflect')
 
     return padded_images
 
@@ -190,8 +190,7 @@ class CenterResizeCropPad:
             transformed_img = F.pad(
                 resized_img,
                 (pad_left, pad_right, pad_top, pad_bottom),
-                mode='constant',
-                value=0
+                mode='reflect',
             )
         
         # Case 2: If scale > min(output_size), center crop to output_size
