@@ -31,9 +31,14 @@ temp_script="job_scripts/job_${job_name}.sh"
 cp submit_template.sh $temp_script
 
 cpu_per_gpu=1
-cpus=$((gpus * cpu_per_gpu))
+mem_per_gpu=8
 
-mem_per_gpu=32
+if [ "${partition}" = "gpu-he" ]; then
+    cpu_per_gpu=2
+    mem_per_gpu=16
+fi
+
+cpus=$((gpus * cpu_per_gpu))
 mem=$((gpus * mem_per_gpu))
 mem="${mem}GB"
 

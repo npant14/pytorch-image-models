@@ -43,7 +43,7 @@ def pad_batch_random(images, target_size):
         padded_image = F.pad(
             images[i:i+1],
             (pad_left, pad_right, pad_top, pad_bottom),
-            mode='reflect',
+            mode='constant',
         )
         padded_images.append(padded_image)
     
@@ -67,7 +67,7 @@ def pad_batch(images, target_size):
 
     # Apply padding
     # Use reflection padding to avoid artifacts, or constant for default
-    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='reflect')
+    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant')
 
     return padded_images
 
@@ -136,7 +136,7 @@ class RandomResizePad:
     
 
 class CenterResizeCropPad:
-    def __init__(self, output_size=(227, 227), scale=160):
+    def __init__(self, output_size=(227, 227), scale=160, mode='constant'):
         """
         Transform that handles different scale invariances.
         
@@ -148,6 +148,7 @@ class CenterResizeCropPad:
         """
         self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
         self.scale = scale
+        self.mode = mode
         
     def __call__(self, img):
         """
@@ -190,7 +191,7 @@ class CenterResizeCropPad:
             transformed_img = F.pad(
                 resized_img,
                 (pad_left, pad_right, pad_top, pad_bottom),
-                mode='reflect',
+                mode=self.mode,
             )
         
         # Case 2: If scale > min(output_size), center crop to output_size
@@ -291,7 +292,7 @@ def visualize_transforms(img, scales, target_size=(322, 322), save_path="transfo
     
     # Apply transforms at different scales and visualize
     for i, scale in enumerate(scales):
-        transform = CenterResizeCropPad(output_size=target_size, scale=scale)
+        transform = CenterResizeCropPad(output_size=target_size, scale=scale, mode='constant')
         transformed_tensor = transform(img_tensor)
         
         # Convert tensor back to numpy for visualization - move to CPU first
@@ -313,3 +314,16 @@ def visualize_transforms(img, scales, target_size=(322, 322), save_path="transfo
     plt.tight_layout()
     plt.savefig(save_path)
     print(f"Visualization saved to {save_path}")
+    
+    modes = ['replicate', 'circular', 'constant', 'reflect']
+
+    scale = 160
+    for mode in modes:
+        transform = CenterResizeCropPad(output_size=target_size, scale=scale, mode=mode)
+        transformed_tensor = transform(img_tensor)
+
+        transformed_img = transformed_tensor.cpu().permute(1, 2, 0).numpy()
+        transformed_img = np.clip(transformed_img, 0, 1)
+
+        save_path = f"scale{scale}_{mode}.png"
+        plt.imsave(save_path, transformed_img)

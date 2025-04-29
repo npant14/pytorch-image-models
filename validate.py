@@ -329,12 +329,12 @@ def validate(args):
     sample_image, _ = next(iter(loader))
 
     #####PADDING FOR VALIDATION################
-    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode='constant') # or 'reflect' 'circular' 'replicate'
     loader = DataLoaderTransformWrapper(loader, transform)
 
     visualize = False
     if visualize == True:
-        scales = [160, 192, 227, 322, 382, 454]
+        scales = [160, 192, 227, 270, 322, 382, 454]
         visualize_transforms(sample_image, scales, target_size)
         exit(0)
     
