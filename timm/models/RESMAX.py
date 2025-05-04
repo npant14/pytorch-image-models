@@ -35,7 +35,7 @@ def pad_to_size(a, size, mode='constant'):
     pad_left = total_pad_w // 2
     pad_right = total_pad_w - pad_left
 
-    a = nn.functional.pad(a, (pad_left, pad_right, pad_top, pad_bottom), mode=mode)
+    a = nn.functional.pad(a, (pad_left, pad_right, pad_top, pad_bottom), mode=mode, value=0)
 
     return a
 
@@ -400,6 +400,9 @@ class RESMAX_V2_1(nn.Module):
                  bypass=False, main_route=False,
                  c_scoring='v2',
                  **kwargs):
+        """
+        choose biggest band in bypass
+        """
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
@@ -559,6 +562,9 @@ class RESMAX_V2_2(nn.Module):
                  bypass=False, main_route=False,
                  c_scoring='v2',
                  **kwargs):
+        """
+        smartly choose band in bypass use c score
+        """
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
@@ -722,6 +728,10 @@ class RESMAX_V2_3(nn.Module):
                  bypass=False, main_route=False,
                  c_scoring='v2',
                  **kwargs):
+        """
+        Use additional one bn after conv3 in residual block, check Residual1 plz
+        choose smallest band in bypass
+        """
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
@@ -775,10 +785,10 @@ class RESMAX_V2_3(nn.Module):
             )
 
         self.s3 = nn.Sequential(
-            Residual(input_channels, 256),
-            Residual(256, 384),
-            Residual(384, 384),
-            Residual(384, 256)
+            Residual1(256, 256),
+            Residual1(256, 384),
+            Residual1(384, 384),
+            Residual1(384, 256)
         )
         if self.ip_scale_bands > 4:
             self.global_pool = C_scoring2_optimized(
@@ -1212,6 +1222,12 @@ class RESMAX_V3_1(nn.Module):
         print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
 
 
+"""
+In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+the returned features are [0] for C1 and C2.
+
+We get good result under 0.1 lambda, bypass True
+"""
 class CHRESMAX_V3(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
@@ -1303,7 +1319,33 @@ class CHRESMAX_V3(nn.Module):
         return stream_1_output, correct_scale_loss
 
 
-class CHRESMAX_V3(nn.Module):
+def pad_to_size_blue(a, size):
+    """
+    Pads tensor `a` (B, C, H, W) to the given `size` (H_out, W_out) with blue color.
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    # Create a blue canvas (R=0, G=0, B=1 if input is float; B=255 if uint8)
+    dtype = a.dtype
+    device = a.device
+    B, C = a.shape[:2]
+    blue_val = 1.0 if dtype == torch.float32 else 255
+    canvas = torch.zeros((B, C, size[0], size[1]), dtype=dtype, device=device)
+    if C == 3:
+        canvas[:, 2, :, :] = blue_val  # Blue channel
+
+    # Paste `a` in the center
+    canvas[:, :, pad_top:pad_top + current_size[0], pad_left:pad_left + current_size[1]] = a
+    return canvas
+
+class CHRESMAX_V3_blue(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
     using RESMAX_V2 as the backbone.
@@ -1358,7 +1400,7 @@ class CHRESMAX_V3(nn.Module):
 
         if new_hw <= img_hw:
             # pad if smaller
-            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+            x_rescaled = pad_to_size_blue(x_rescaled, (img_hw, img_hw))
         else:
             # center-crop if bigger
             center_crop = torchvision.transforms.CenterCrop(img_hw)
@@ -1393,7 +1435,240 @@ class CHRESMAX_V3(nn.Module):
 
         return stream_1_output, correct_scale_loss
     
+def pad_to_size_noise(a, size, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """
+    Pads tensor `a` (B, C, H, W) to the given `size` (H_out, W_out) with Gaussian noise.
+    Noise is generated per channel with the given mean and std (e.g., ImageNet stats).
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    dtype = a.dtype
+    device = a.device
+    B, C = a.shape[:2]
+
+    # Create noise background
+    canvas = torch.zeros((B, C, size[0], size[1]), dtype=dtype, device=device)
+    for c in range(C):
+        noise = torch.randn((B, 1, size[0], size[1]), dtype=dtype, device=device) * std[c] + mean[c]
+        canvas[:, c:c+1, :, :] = noise
+
+    # Paste input tensor in the center
+    canvas[:, :, pad_top:pad_top + current_size[0], pad_left:pad_left + current_size[1]] = a
+    return canvas
+
+class CHRESMAX_V3_noise(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+
+    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+    the returned features are [0] for C1 and C2.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
+
+        # stream 2 (random scale)
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            x_rescaled = pad_to_size_noise(x_rescaled, (img_hw, img_hw))
+        else:
+            # center-crop if bigger
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        # forward pass on the scaled input
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+
+        # Compute scale-consistency loss between the two streams, list ver
+        c1_correct_scale_loss = 0
+        for i in range(len(stream_1_c1_feats)):
+            c1_correct_scale_loss += torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i]))
+        c1_correct_scale_loss /= len(stream_1_c1_feats)  # Average over all feature maps
+        
+        c2_correct_scale_loss = 0
+        for i in range(len(stream_1_c2_feats)):
+            c2_correct_scale_loss += torch.mean(torch.abs(stream_1_c2_feats[i] - stream_2_c2_feats[i]))
+        c2_correct_scale_loss /= len(stream_1_c2_feats)  # Average over all feature maps
+        
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+
+        return stream_1_output, correct_scale_loss
+
+def pad_to_size_gray(a, size, gray_val_float=0.5, gray_val_uint8=128):
+    """
+    Pads tensor `a` (B, C, H, W) to `size` with uniform gray background using F.pad.
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    if torch.is_floating_point(a):
+        pad_val = gray_val_float
+    else:
+        pad_val = gray_val_uint8
+
+    # Note: F.pad pads in (left, right, top, bottom) order
+    a_padded = F.pad(a, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=pad_val)
+    return a_padded
+
+class CHRESMAX_V3_gray(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+
+    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+    the returned features are [0] for C1 and C2.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
+
+        # stream 2 (random scale)
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            x_rescaled = pad_to_size_gray(x_rescaled, (img_hw, img_hw))
+        else:
+            # center-crop if bigger
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        # forward pass on the scaled input
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+
+        # Compute scale-consistency loss between the two streams, list ver
+        c1_correct_scale_loss = 0
+        for i in range(len(stream_1_c1_feats)):
+            c1_correct_scale_loss += torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i]))
+        c1_correct_scale_loss /= len(stream_1_c1_feats)  # Average over all feature maps
+        
+        c2_correct_scale_loss = 0
+        for i in range(len(stream_1_c2_feats)):
+            c2_correct_scale_loss += torch.mean(torch.abs(stream_1_c2_feats[i] - stream_2_c2_feats[i]))
+        c2_correct_scale_loss /= len(stream_1_c2_feats)  # Average over all feature maps
+        
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+
+        return stream_1_output, correct_scale_loss
     
+
+"""
+choose largest band in bypass
+"""
 class CHRESMAX_V3_1(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
@@ -1484,7 +1759,9 @@ class CHRESMAX_V3_1(nn.Module):
 
         return stream_1_output, correct_scale_loss
     
-    
+"""
+choose smartly in bypass
+"""
 class CHRESMAX_V3_2(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
@@ -1575,17 +1852,104 @@ class CHRESMAX_V3_2(nn.Module):
 
         return stream_1_output, correct_scale_loss
     
-
-
-class CHRESMAX_V4(nn.Module):
+"""
+use additional bn, backbone resnet_v2_3
+"""
+class CHRESMAX_V3_3(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
     using RESMAX_V2 as the backbone.
 
-    In V4, we use new loss clip loss. also use reflect for padding
     In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
     the returned features are [0] for C1 and C2.
     """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_V2_3(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
+
+        # stream 2 (random scale)
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        else:
+            # center-crop if bigger
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        # forward pass on the scaled input
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+
+        # Compute scale-consistency loss between the two streams, list ver
+        c1_correct_scale_loss = 0
+        for i in range(len(stream_1_c1_feats)):
+            c1_correct_scale_loss += torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i]))
+        c1_correct_scale_loss /= len(stream_1_c1_feats)  # Average over all feature maps
+        
+        c2_correct_scale_loss = 0
+        for i in range(len(stream_1_c2_feats)):
+            c2_correct_scale_loss += torch.mean(torch.abs(stream_1_c2_feats[i] - stream_2_c2_feats[i]))
+        c2_correct_scale_loss /= len(stream_1_c2_feats)  # Average over all feature maps
+        
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+
+        return stream_1_output, correct_scale_loss
+
+"""
+In V4, we use new loss clip loss. also use reflect for padding
+"""
+class CHRESMAX_V4(nn.Module):
+
     def __init__(self, 
                  num_classes=1000,
                  in_chans=3,
@@ -1704,16 +2068,11 @@ class CHRESMAX_V4(nn.Module):
 
                             
         return out1, total_loss
-    
-class CHRESMAX_V5(nn.Module):
-    """
-    Example student-teacher style model with scale-consistency loss,
-    using RESMAX_V2 as the backbone.
 
-    In V4, we use new loss clip loss. also use reflect for padding
-    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
-    the returned features are [0] for C1 and C2.
-    """
+"""
+In V5 uses V3 Resmax, performance not good
+""" 
+class CHRESMAX_V5(nn.Module):
     def __init__(self, 
                  num_classes=1000,
                  in_chans=3,
@@ -2010,7 +2369,6 @@ class ContrastiveRESMAX(nn.Module):
         # print(f"c1_contrastive_loss: {c1_contrastive_loss}, c2_contrastive_loss: {c2_contrastive_loss}, out_contrastive_loss: {out_contrastive_loss}")
                 
         return out1, total_loss
-    
 
 # Create a new model for contrastive fine-tuning
 class ContrastiveRESMAXV1(nn.Module):
@@ -2248,6 +2606,50 @@ def chresmax_v3_2(pretrained=False, **kwargs):
     model = CHRESMAX_V3_2(**kwargs)
     return model
 
+@register_model
+def chresmax_v3_blue(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_blue(**kwargs)
+    return model
+
+@register_model
+def chresmax_v3_noise(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_noise(**kwargs)
+    return model
+
+@register_model
+def chresmax_v3_gray(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_gray(**kwargs)
+    return model
 
 @register_model
 def chresmax_v4(pretrained=False, **kwargs):

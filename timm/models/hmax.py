@@ -258,14 +258,14 @@ class HMAX_latest(nn.Module):
         )
 
         # S2/C2 & S3/C3
-        self.s2 = S2(n_ori, 100, kernel_size=3, stride=1)
+        self.s2 = S2(n_ori, 64, kernel_size=3, stride=1)
         self.c2 = C(
             sp_kernel_size=self._get_kernel_sizes(self._get_kernel_sizes(self.s1_scales, 2, 2), 2, 2),
             n_in_sbands=8,
             num_scales_pooled=2,
             scale_stride=2
         )
-        self.s3 = S3(100, 100, kernel_size=3, stride=1)
+        self.s3 = S3(64, 64, kernel_size=3, stride=1)
         self.c3 = C(
             sp_kernel_size=-1,  # Global pooling
             n_in_sbands=4,
@@ -274,7 +274,7 @@ class HMAX_latest(nn.Module):
         )
 
         # Bypass pathway: S2b + C2b
-        self.s2b = S2(n_ori, 100, kernel_size=[6, 9, 12, 15], stride=1)
+        self.s2b = S2(n_ori, 64, kernel_size=[6, 9, 12, 15], stride=1)
         self.c2b = C(
             sp_kernel_size=-1,
             n_in_sbands=8,
