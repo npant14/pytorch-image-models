@@ -64,6 +64,49 @@ def fast_collate(batch):
         assert False
 
 
+def fast_collate_scale(batch):
+    """ A fast collation function optimized for uint8 images (np array or torch) and int64 targets (labels)
+    with additional scale and center values"""
+    
+    assert isinstance(batch[0], tuple)
+    batch_size = len(batch)
+    if isinstance(batch[0][0], tuple):
+        # This branch handles tuples of input tensors
+        inner_tuple_size = len(batch[0][0])
+        targets = torch.zeros(batch_size, dtype=torch.int64)
+        scales = torch.zeros(batch_size, dtype=torch.int64)
+        centers = torch.zeros((batch_size, 2), dtype=torch.float32)
+        tensor = torch.zeros((batch_size, *batch[0][0][0].shape), dtype=torch.uint8)
+        for i in range(batch_size):
+            assert len(batch[i][0]) == inner_tuple_size  # all input tensor tuples must be same length
+            # Take the first element of the tuple as the main image
+            targets[i] = batch[i][1]
+            scales[i] = batch[i][2]
+            centers[i] = batch[i][3]
+            tensor[i] += torch.from_numpy(batch[i][0][0])
+        return tensor, targets, scales, centers
+    elif isinstance(batch[0][0], np.ndarray):
+        targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
+        scales = torch.tensor([b[2] for b in batch], dtype=torch.int64)
+        centers = torch.stack([b[3] for b in batch])  # Stack the center tensors
+        assert len(targets) == batch_size
+        tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
+        for i in range(batch_size):
+            tensor[i] += torch.from_numpy(batch[i][0])
+        return tensor, targets, scales, centers
+    elif isinstance(batch[0][0], torch.Tensor):
+        targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
+        scales = torch.tensor([b[2] for b in batch], dtype=torch.int64)
+        centers = torch.stack([b[3] for b in batch])  # Stack the center tensors
+        assert len(targets) == batch_size
+        tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
+        for i in range(batch_size):
+            tensor[i].copy_(batch[i][0])
+        return tensor, targets, scales, centers
+    else:
+        assert False
+
+
 def adapt_to_chs(x, n):
     if not isinstance(x, (tuple, list)):
         x = tuple(repeat(x, n))
@@ -98,7 +141,6 @@ class PrefetchLoaderScale:
         self.loader = loader
         self.device = device
         if fp16:
-            # fp16 arg is deprecated, but will override dtype arg if set for bwd compat
             img_dtype = torch.float16
         self.img_dtype = img_dtype
         self.mean = torch.tensor(
@@ -116,41 +158,46 @@ class PrefetchLoaderScale:
         else:
             self.random_erasing = None
         self.is_cuda = torch.cuda.is_available() and device.type == 'cuda'
+        
+        # Add tracking for processed samples
+        self.processed_indices = set()
+        self.current_epoch = 0
 
-    def __iter__(self):
-        first = True
+    def _process_batch(self, batch):
+        """Process a single batch of data"""
         if self.is_cuda:
             stream = torch.cuda.Stream()
-            stream_context = partial(torch.cuda.stream, stream=stream)
-        else:
-            stream = None
-            stream_context = suppress
-
-        for next_input, next_target,next_scale, next_center in self.loader:
-            
-            with stream_context():
-                next_input = next_input.to(device=self.device, non_blocking=True)
-                next_target = next_target.to(device=self.device, non_blocking=True)
-                next_scale = next_scale.to(device=self.device, non_blocking=True)
-                next_center = next_center.to(device=self.device, non_blocking=True)
-                next_input = next_input.to(self.img_dtype).sub_(self.mean).div_(self.std)
+            with torch.cuda.stream(stream):
+                input, target, scale, center = batch
+                input = input.to(device=self.device, non_blocking=True)
+                target = target.to(device=self.device, non_blocking=True)
+                scale = scale.to(device=self.device, non_blocking=True)
+                center = center.to(device=self.device, non_blocking=True)
+                
+                # Ensure input is in the correct format (B, C, H, W)
+                if input.dim() == 3:
+                    input = input.unsqueeze(0)
+                
+                # Convert to float and normalize
+                input = input.to(self.img_dtype)
+                input = (input - self.mean) / self.std
+                
                 if self.random_erasing is not None:
-                    next_input = self.random_erasing(next_input)
+                    input = self.random_erasing(input)
+                    
+                return input, target, scale, center
+        else:
+            return batch
 
-            if not first:
-                yield input, target, scale, center
-            else:
-                first = False
-
-            if stream is not None:
-                torch.cuda.current_stream().wait_stream(stream)
-
-            input = next_input
-            target = next_target
-            scale = next_scale
-            center = next_center
-
-        yield input, target, scale, center
+    def __iter__(self):
+        self.current_epoch += 1
+        self.processed_indices.clear()
+        _logger.info(f"Starting epoch {self.current_epoch}")
+        
+        for batch in self.loader:
+            # Process the batch
+            processed_batch = self._process_batch(batch)
+            yield processed_batch
 
     def __len__(self):
         return len(self.loader)
@@ -290,10 +337,7 @@ def _worker_init(worker_id, worker_seeding='all'):
             np.random.seed(worker_info.seed % (2 ** 32 - 1))
 
 def create_loader_scale(
-        csv_file: str,
-        root_dir: str,
-        mask_look_up_json: str,
-        root: str, 
+        dataset: Union[ScaledImagenetDataset, IterableImageDataset],
         input_size: Union[int, Tuple[int, int], Tuple[int, int, int]],
         batch_size: int,
         is_training: bool = False,
@@ -327,48 +371,55 @@ def create_loader_scale(
         fp16: bool = False,  # deprecated, use img_dtype
         img_dtype: torch.dtype = torch.float32,
         device: torch.device = torch.device('cuda'),
-        use_prefetcher: bool = False,
+        use_prefetcher: bool = True,
         use_multi_epochs_loader: bool = False,
         persistent_workers: bool = True,
         worker_seeding: str = 'all',
         tf_preprocessing: bool = False,
-        # New parameter for the scaled loader:
-        crop_size: int = 322,
 ):
     """
     This function creates a DataLoader for a ScaledImagenetDataset.
-    In this loader the final crop size is specified by `crop_size` and the image is first
-    resized to a proportional size computed as:
-         resize_size = round(crop_size * (256/224))
-    and then center cropped to (crop_size, crop_size).
-
-    All the remaining parameters are the same as in `create_loader` from timm.
-    Note: Because the logic for computing a “center” relies on a fixed resize + center crop,
-          any random augmentation (e.g. RandomResizedCrop) is disabled here.
+    All parameters are the same as in `create_loader` from timm.
     """
+    re_num_splits = 0
+    if re_split:
+        # apply RE to second half of batch if no aug split otherwise line up with aug split
+        re_num_splits = num_aug_splits or 2
 
-    # Instantiate your custom dataset.
-    dataset = ScaledImagenetDataset(csv_file, root_dir,mask_look_up_json,root=root, transform=None, crop_size=crop_size)
+    dataset.transform = create_transform(
+        input_size,
+        is_training=is_training,
+        no_aug=no_aug,
+        train_crop_mode=train_crop_mode,
+        scale=scale,
+        ratio=ratio,
+        hflip=hflip,
+        vflip=vflip,
+        color_jitter=color_jitter,
+        color_jitter_prob=color_jitter_prob,
+        grayscale_prob=grayscale_prob,
+        gaussian_blur_prob=gaussian_blur_prob,
+        auto_augment=auto_augment,
+        interpolation=interpolation,
+        mean=mean,
+        std=std,
+        crop_pct=crop_pct,
+        crop_mode=crop_mode,
+        crop_border_pixels=crop_border_pixels,
+        re_prob=re_prob,
+        re_mode=re_mode,
+        re_count=re_count,
+        re_num_splits=re_num_splits,
+        tf_preprocessing=tf_preprocessing,
+        use_prefetcher=use_prefetcher,
+        separate=num_aug_splits > 0,
+    )
 
-    # Compute the resize size to preserve the ratio (e.g. 224->256)
-    resize_size = int(round(crop_size * (256 / 224)))
-
-    # Create a fixed (deterministic) transform:
-    # Here we use a Resize (to resize_size) followed by a CenterCrop (to crop_size).
-    # You may adjust this pipeline if you wish to incorporate further (deterministic) augmentations.
-    transform = transforms.Compose([
-        transforms.Resize((resize_size, resize_size), interpolation=InterpolationMode.BILINEAR),
-        transforms.CenterCrop((crop_size, crop_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=mean, std=std),
-    ])
-    dataset.transform = transform
-
-    # (If your dataset is Iterable, pass along the num_workers info.)
     if isinstance(dataset, IterableImageDataset):
+        # give Iterable datasets early knowledge of num_workers so that sample estimates
+        # are correct before worker processes are launched
         dataset.set_loader_cfg(num_workers=num_workers)
 
-    # Build the sampler
     sampler = None
     if distributed and not isinstance(dataset, torch.utils.data.IterableDataset):
         if is_training:
@@ -377,38 +428,34 @@ def create_loader_scale(
             else:
                 sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         else:
+            # This will add extra duplicate entries to result in equal num
+            # of samples per-process, will slightly alter validation results
             sampler = OrderedDistributedSampler(dataset)
     else:
-        assert num_aug_repeats == 0, "RepeatAugment not supported in non-distributed or IterableDataset use"
+        assert num_aug_repeats == 0, "RepeatAugment not currently supported in non-distributed or IterableDataset use"
 
-    # Decide on a collate function
     if collate_fn is None:
-        collate_fn =  torch.utils.data.dataloader.default_collate
+        collate_fn = fast_collate_scale if use_prefetcher else torch.utils.data.dataloader.default_collate
 
-    # Pick the DataLoader class
     loader_class = torch.utils.data.DataLoader
     if use_multi_epochs_loader:
         loader_class = MultiEpochsDataLoader
 
-    re_num_splits = 0
-    if re_split:
-        re_num_splits = num_aug_splits or 2
-
     loader_args = dict(
         batch_size=batch_size,
-        shuffle=(not isinstance(dataset, torch.utils.data.IterableDataset)) and (sampler is None) and is_training,
+        shuffle=not isinstance(dataset, torch.utils.data.IterableDataset) and sampler is None and is_training,
         num_workers=num_workers,
         sampler=sampler,
         collate_fn=collate_fn,
         pin_memory=pin_memory,
         drop_last=is_training,
         worker_init_fn=partial(_worker_init, worker_seeding=worker_seeding),
-        persistent_workers=persistent_workers,
+        persistent_workers=persistent_workers
     )
     try:
         loader = loader_class(dataset, **loader_args)
     except TypeError as e:
-        loader_args.pop('persistent_workers')  # for older PyTorch versions
+        loader_args.pop('persistent_workers')  # only in Pytorch 1.7+
         loader = loader_class(dataset, **loader_args)
 
     if use_prefetcher:
@@ -419,7 +466,7 @@ def create_loader_scale(
             std=std,
             channels=input_size[0] if isinstance(input_size, (tuple, list)) else 3,
             device=device,
-            fp16=fp16,
+            fp16=fp16,  # deprecated, use img_dtype
             img_dtype=img_dtype,
             re_prob=prefetch_re_prob,
             re_mode=re_mode,
@@ -468,6 +515,7 @@ def create_loader(
         use_multi_epochs_loader: bool = False,
         persistent_workers: bool = True,
         worker_seeding: str = 'all',
+        use_scaled_imagenet_dataset: bool = False,
         tf_preprocessing: bool = False,
 ):
     """
@@ -569,7 +617,7 @@ def create_loader(
         assert num_aug_repeats == 0, "RepeatAugment not currently supported in non-distributed or IterableDataset use"
 
     if collate_fn is None:
-        collate_fn = fast_collate if use_prefetcher else torch.utils.data.dataloader.default_collate
+        collate_fn = fast_collate_scale if use_prefetcher else torch.utils.data.dataloader.default_collate
 
     loader_class = torch.utils.data.DataLoader
     if use_multi_epochs_loader:
@@ -593,7 +641,7 @@ def create_loader(
         loader = loader_class(dataset, **loader_args)
     if use_prefetcher:
         prefetch_re_prob = re_prob if is_training and not no_aug else 0.
-        loader = PrefetchLoader(
+        loader = PrefetchLoaderScale(
             loader,
             mean=mean,
             std=std,

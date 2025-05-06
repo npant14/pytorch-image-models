@@ -97,6 +97,86 @@ class CScaleSelectFC(nn.Module):
         
         return [fused_feat], scale_logits
 
+class CScaleSelectFC_v3(nn.Module):
+    """
+    A 'C' layer that does scale selection via an FC for AlexMax.
+    
+    Steps:
+      1) For each scale, do a conv to unify channels => out_chans.
+      2) Resize all features to a common size using learnable resizing layers
+      3) Global pool => shape (N, out_chans).
+      4) Concatenate => FC => scale logits => softmax => alpha_i.
+      5) Weighted sum of scale feature maps => fused.
+      6) Return [fused], scale_logits.
+    """
+    def __init__(self, in_chans=96,last_features=512, out_chans=96, num_scales=2, conv_ks=3, resize_kernel_1=1, resize_kernel_2=3):
+        super().__init__()
+        self.num_scales = num_scales
+        self.out_chans = out_chans
+        self.last_features = last_features
+        
+        # A conv for each scale
+        self.convs = nn.Conv2d(in_chans, out_chans, kernel_size=conv_ks, padding=1)
+        self.bns = nn.BatchNorm2d(out_chans)
+        
+        # Learnable resizing layers for each scale
+        self.resizing_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(out_chans, out_chans, kernel_size=resize_kernel_1, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_chans, out_chans, kernel_size=resize_kernel_2, padding=1)
+            ) for _ in range(num_scales)
+        ])
+        
+        # FC for scale selection - Changed to outpu num_scales instead of hardcoded 10
+        self.fc = nn.Linear(last_features, num_scales)
+
+    def forward(self, x_list):
+        """
+        x_list: list[Tensor] of length num_scales
+            each => shape [N, in_chans, H, W]
+        Returns:
+            ([fused_feature], scale_logits)
+              fused_feature => shape [N, out_chans, H, W] 
+        """
+        # conv each scale
+        feats = []
+        
+        for i in range(len(x_list)):
+            x = F.relu(self.bns(self.convs(x_list[i])))
+            feats.append(x)
+        
+        # Resize all features to the middle scale size
+        middle_idx = len(feats) // 2
+        target_size = feats[middle_idx].shape[-2:]
+         # Resize and apply learnable resizing layers
+        resized_feats = []
+        
+        for i, feat in enumerate(feats):
+            feat_resized = F.interpolate(feat, size=target_size, mode='bilinear', align_corners=False)
+            feat_resized = self.resizing_layers[i](feat_resized)
+            resized_feats.append(feat_resized)
+        
+        del feats
+        # global avg pool => shape [N, out_chans]
+        pooled_list = [f.mean(dim=(2,3)) for f in resized_feats]
+        
+        # concat => shape [N, out_chans * num_scales]
+        concat_pooled = torch.cat(pooled_list, dim=1)
+        
+        # FC => scale logits => [N, num_scales]
+        scale_logits = self.fc(concat_pooled)
+        
+        # softmax => scale weights
+        alpha = F.softmax(scale_logits, dim=1)  # [N, num_scales]
+        
+        # Weighted sum of feats => fused
+        N, C, H, W = resized_feats[0].shape
+        alpha_5d = alpha.view(N, self.num_scales, 1, 1, 1)  # => [N, S, 1, 1, 1]
+        stack_feats = torch.stack(resized_feats, dim=1)     # => [N, S, C, H, W]
+        fused_feat = (alpha_5d * stack_feats).sum(dim=1)    # => [N, C, H, W]
+        
+        return [fused_feat], scale_logits
 
 
 class BypassPath(nn.Module):

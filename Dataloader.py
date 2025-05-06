@@ -50,7 +50,8 @@ class ScaledImagenetDataset(Dataset):
         
         img_path = self.mask_lookup[img_file]["image_path"]
         mask_path = self.mask_lookup[img_file]["mask_path"]
-        
+        print(img_path)
+        print(mask_path)
         wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
         class_label = wordnet_to_label.get(wordnet_id, "Unknown")
         
@@ -109,59 +110,63 @@ def show_batch(sample_batched, save_path=None):
     else:
         plt.show()
 
-transform_pipeline = transforms.Compose([
+
+
+
+if __name__ == '__main__':
+    #csv_file = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
+    csv_file = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/foreground_proportions_with_rescaled_centers.csv'
+    root_dir = "/gpfs/data/tserre/npant1/ILSVRC/train"
+    mask_lookup_json = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
+    transform_pipeline = transforms.Compose([
     transforms.Resize((322, 322)),
-    transforms.ToTensor()
+     transforms.ToTensor()
 ])
+    import pdb; pdb.set_trace()
+    dataset = ScaledImagenetDataset(
+        csv_file=csv_file,
+        root_dir=root_dir,
+        mask_lookup_json=mask_lookup_json,
+        transform=transform_pipeline
+    )
+    import torch.nn as nn
+    bsize = 128
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=bsize, 
+        shuffle=True, 
+        num_workers=1,
+        multiprocessing_context='spawn' if torch.cuda.is_available() else None
+    )
 
-csv_file = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
-root_dir = "/gpfs/data/tserre/npant1/ILSVRC/train"
-mask_lookup_json = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
+    for i_batch, sample_batched in enumerate(dataloader):
+        
+        scale_band = sample_batched['scale_band']
+        scale_band = 10 - scale_band  # so it's 0-based
+        scale_band = torch.tensor(scale_band)
+        print(scale_band)
+        labels = torch.tensor(sample_batched['class_label'])
+        #dummy scale_logits
+        scale_logits = torch.randn(bsize, 11)
+        # dummy logits 1000 classes 
+        logits = torch.randn(bsize, 1000)
 
-dataset = ScaledImagenetDataset(
-    csv_file=csv_file,
-    root_dir=root_dir,
-    mask_lookup_json=mask_lookup_json,
-    transform=transform_pipeline
-)
-import torch.nn as nn
-bsize = 128
-dataloader = DataLoader(
-    dataset, 
-    batch_size=bsize, 
-    shuffle=True, 
-    num_workers=4,
-    multiprocessing_context='spawn' if torch.cuda.is_available() else None
-)
-
-for i_batch, sample_batched in enumerate(dataloader):
-    
-    scale_band = sample_batched['scale_band']
-    scale_band = 10 - scale_band  # so it's 0-based
-    scale_band = torch.tensor(scale_band)
-    print(scale_band)
-    labels = torch.tensor(sample_batched['class_label'])
-    #dummy scale_logits
-    scale_logits = torch.randn(bsize, 11)
-    # dummy logits 1000 classes 
-    logits = torch.randn(bsize, 1000)
-
-    # apply cross entropy loss
-    
-    loss_fn = nn.CrossEntropyLoss()
-    loss = loss_fn(scale_logits, scale_band)
-    print(i_batch, loss)
-    loss_fn = nn.CrossEntropyLoss()
-    loss = loss_fn(logits, labels)
-    print(i_batch, loss)
-    # except Exception as e:
-    #     print(f"Error in batch {i_batch}: {e}")
-    #     import pdb; pdb.set_trace()
-    
-    # if i_batch == 0:
-    #     output_dir = "/users/irodri15/data/irodri15/Hmax/pytorch-image-models/"
-    #     os.makedirs(output_dir, exist_ok=True)
-    #     save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
-    #     show_batch(sample_batched, save_path=save_path)
-    #     break
+        # apply cross entropy loss
+        
+        loss_fn = nn.CrossEntropyLoss()
+        loss = loss_fn(scale_logits, scale_band)
+        print(i_batch, loss)
+        loss_fn = nn.CrossEntropyLoss()
+        loss = loss_fn(logits, labels)
+        print(i_batch, loss)
+        # except Exception as e:
+        #     print(f"Error in batch {i_batch}: {e}")
+        #     import pdb; pdb.set_trace()
+        
+        # if i_batch == 0:
+        #     output_dir = "/users/irodri15/data/irodri15/Hmax/pytorch-image-models/"
+        #     os.makedirs(output_dir, exist_ok=True)
+        #     save_path = os.path.join(output_dir, f"batch_{i_batch}.png")
+        #     show_batch(sample_batched, save_path=save_path)
+        #     break
 

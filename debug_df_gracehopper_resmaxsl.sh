@@ -22,10 +22,10 @@ BYPASS=True
 CL_LAMBDA=1
 
 
-CLASSIFIER_INPUT_SIZE=18432
+CLASSIFIER_INPUT_SIZE=13312
 
 echo "Starting experiment"
-sh distributed_stu_dl.sh 8 train_skeleton_dl.py \
+sh distributed_stu_dl.sh 1 train_skeleton_dl.py \
     --data-dir /oscar/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet_scale \
     --model $MODEL \
@@ -33,7 +33,7 @@ sh distributed_stu_dl.sh 8 train_skeleton_dl.py \
     --scale-bands $SCALE_BANDS \
     --opt sgd \
     --cl-lambda $CL_LAMBDA \
-    -b 20 \
+    -b 160 \
     --epochs 90 \
     --alpha $ALPHA \
     --lr 1e-2 \
@@ -47,8 +47,10 @@ sh distributed_stu_dl.sh 8 train_skeleton_dl.py \
     --train-crop-mode rrc\
     --scale 1.0 1.0 \
     --start-epoch 0\
+    --workers 8\
+    --initial-checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/gracehopper_debug3_dl_chresmax_v3_s_5_322_13312_alpha_1_bypass_True_contrastive_loss/checkpoint-5.pth.tar \
     --input-size 3 322 322\
-    --experiment gpu_debug1_dl_${MODEL}_${SCALE_BANDS}_322_${CLASSIFIER_INPUT_SIZE}_alpha_${ALPHA}_bypass_${BYPASS}_contrastive_loss\
+    --experiment gracehopper_debug1_dl_${MODEL}_${SCALE_BANDS}_322_${CLASSIFIER_INPUT_SIZE}_alpha_${ALPHA}_bypass_${BYPASS}_contrastive_loss\
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/\
     
  

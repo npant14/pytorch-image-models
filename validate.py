@@ -442,10 +442,10 @@ def validate(args):
         top1a, top5a = top1.avg, top5.avg
     results = OrderedDict(
         model=args.model,
-        ip_band=args.model_kwargs['ip_scale_bands'],
-        classifier_input_size=args.model_kwargs['classifier_input_size'],
-        bypass=args.model_kwargs['bypass'],
-        cl=args.model_kwargs['cl'],
+        ip_band=args.model_kwargs['ip_scale_bands'] if 'ip_scale_bands' in args.model_kwargs else None,
+        classifier_input_size=args.model_kwargs['classifier_input_size'] if 'classifier_input_size' in args.model_kwargs else None,
+        bypass=args.model_kwargs['bypass'] if 'bypass' in args.model_kwargs else None,
+        cl=args.model_kwargs['cl'] if 'cl' in args.model_kwargs else None,
         scale_invariance=args.image_scale[1],
         model_scale=data_config['input_size'][-1],
         top1=round(top1a, 4), top1_err=round(100 - top1a, 4),

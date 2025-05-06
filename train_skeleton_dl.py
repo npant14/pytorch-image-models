@@ -70,14 +70,6 @@ try:
 except ImportError as e:
     has_functorch = False
 
-CSV_FILE= "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
-ROOT_DIR = "/oscar/data/tserre/npant1/ILSVRC/train"
-MASK_LOOKUP_JSON = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
-
-if not os.path.exists(CSV_FILE):
-    CSV_FILE = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/foreground_proportions_with_rescaled_centers.csv'
-if not os.path.exists(MASK_LOOKUP_JSON):
-    MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 
 torch.autograd.set_detect_anomaly(True)
 has_compile = hasattr(torch, 'compile')
@@ -229,6 +221,8 @@ group.add_argument('--epochs', type=int, default=300, metavar='N',
                    help='number of epochs to train (default: 300)')
 group.add_argument('--epoch-repeats', type=float, default=0., metavar='N',
                    help='epoch repeat multiplier (number of times to repeat dataset epoch per train epoch).')
+group.add_argument('--start-epoch', default=None, type=int, metavar='N',
+                    help='manual epoch number (useful on restarts)')
 group.add_argument('--decay-epochs', type=float, default=90, metavar='N',
                    help='epoch interval to decay LR')
 group.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
@@ -366,7 +360,7 @@ def train_one_epoch(
     update_time_m = utils.AverageMeter()
     data_time_m = utils.AverageMeter()
     losses_m = utils.AverageMeter()
-    scale_selection_losses_m = utils.AverageMeter()
+    #scale_selection_losses_m = utils.AverageMeter()
     scale_losses_m = utils.AverageMeter()
     model.train()
     
@@ -379,9 +373,10 @@ def train_one_epoch(
     data_start_time = update_start_time = time.time()
     optimizer.zero_grad()
     update_sample_count = 0
+    print('right before the loop')
     for batch_idx, (input, target, scale_band, center) in enumerate(loader):
-
-        # save one image from the batch for debugging
+       
+        # save one  image from the batch for debugging
         if batch_idx == 0:
             save_image(input[0], f"input_{batch_idx}.png")
         
@@ -391,9 +386,9 @@ def train_one_epoch(
         target = target.to(device)
         scale_band = scale_band.to(device)
         #scale_band = scale_band  # So larger scale_band is smaller loss
-       
-        scale_band = 5- scale_bands_range(scale_band, new_max=num_bands)
-       
+        
+        scale_band = num_bands - scale_bands_range(scale_band, new_min=1,new_max=num_bands)
+        
         center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
@@ -402,39 +397,25 @@ def train_one_epoch(
         
         def _forward():
             scale_loss = 0
-            scale_selection_loss = 0
             try:
                 if model.module.contrastive_loss:
-                    output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
+                    
+                    output, scale_loss= model(input,scale_band,center)
+                    
                     scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
+                    loss = loss_fn(output, target)  + (scale_loss)
                 else:
-                    output, scale_logits = model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (scale_selection_loss)
+                    output = model(input,scale_band,center)
+                    loss = loss_fn(output, target)
             except Exception as e:
                 if model.contrastive_loss:
-                    output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss =alpha* F.cross_entropy(scale_logits, scale_band)
+                    output,  scale_loss= model(input,scale_band,center)
                     scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
+                    loss = loss_fn(output, target)  + (scale_loss)
                 else:
-                    output, scale_logits  = model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (scale_selection_loss)
-                    
-            #print one sample from scale_logits and its ground truth
-            #apply softmax to scale_logits
-            scale_logits = F.softmax(scale_logits, dim=1)
-            #print the scale that was selected the most in the batch
-            selected_scale = torch.argmax(scale_logits, dim=1)
-            count_selected_scale = torch.bincount(selected_scale)
-            print(count_selected_scale)
-            count_gt_scale = torch.bincount(scale_band)
-            print(count_gt_scale)
-            return loss, scale_selection_loss, scale_loss
-
+                    output  = model(input,scale_band,center)
+                    loss = loss_fn(output, target) 
+            return loss, scale_loss
         def _backward(_loss):
             if loss_scaler is not None:
                 loss_scaler(
@@ -457,7 +438,7 @@ def train_one_epoch(
                         )
                     optimizer.step()
 
-        loss, scale_selection_loss, scale_loss = _forward()
+        loss, scale_loss = _forward()
         _backward(loss)
 
         running_loss += loss.item()
@@ -467,7 +448,7 @@ def train_one_epoch(
 
         if not args.distributed:
             losses_m.update(loss.item() * accum_steps, input.size(0))
-            scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
+            #scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
             scale_losses_m.update(scale_loss * accum_steps, input.size(0))
         update_sample_count += input.size(0)
 
@@ -497,7 +478,7 @@ def train_one_epoch(
             if args.distributed:
                 reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
                 losses_m.update(reduced_loss.item() * accum_steps, input.size(0))   
-                scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
+                #scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
                 scale_losses_m.update(scale_loss.item() * accum_steps, input.size(0))   
                 update_sample_count *= args.world_size
             if utils.is_primary(args):
@@ -505,7 +486,7 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
-                    f'Scale Selection Loss: {scale_selection_losses_m.val:#.3g} ({scale_selection_losses_m.avg:#.3g})  '
+                    #f'Scale Selection Loss: {scale_selection_losses_m.val:#.3g} ({scale_selection_losses_m.avg:#.3g})  '
                     f'Scale Loss: {scale_losses_m.val:#.3g} ({scale_losses_m.avg:#.3g})  '
                     #f'Time: {update_time_m.val:.3f}s ',
                     #f'({update_time_m.avg:.3f}s)  ',
@@ -517,11 +498,15 @@ def train_one_epoch(
             lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
 
         update_sample_count = 0
-        data_start_time = time.time()    
+        data_start_time = time.time()  
+        
     return OrderedDict([
         ('total_loss', losses_m.avg),
-        ('scale_selection_loss', scale_selection_losses_m.avg),
+        #  ('scale_selection_loss', scale_selection_losses_m.avg),
         ('scale_loss', scale_losses_m.avg),
+        
+        
+        
     ])
 
 def validate(
@@ -543,17 +528,23 @@ def validate(
     last_idx = len(loader) - 1
     
     with torch.no_grad():
-        for batch_idx, (input, target) in enumerate(loader):
+        for batch_idx, batch in enumerate(loader):
+            # Support loaders that return (input,target) or (input,target,scale,center)
+            if len(batch) == 2:
+                input, target = batch
+            elif len(batch) == 4:
+                input, target, _scale, _center = batch  # ignore extra info for validation
+            else:
+                raise RuntimeError(f"Unexpected batch structure with {len(batch)} elements in validate loader")
+
             input = input.to(device)
             target = target.to(device)
             if args.channels_last:
                 input = input.contiguous(memory_format=torch.channels_last)
             
             # (class_logits, scale_logits) = model(input)
-            output, scale_logits,scale_loss = model(input)
+            output,scale_loss  = model(input)
             loss = loss_fn(output, target)
-            scale_loss = args.cl_lambda*scale_loss
-            loss = loss + scale_loss
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             losses_m.update(loss.item(), input.size(0))
             top1_m.update(acc1.item(), input.size(0))
@@ -593,6 +584,7 @@ def main():
         torch.backends.cudnn.benchmark = True
 
     args.prefetcher = not args.no_prefetcher
+    args.grad_accum_steps = max(1, args.grad_accum_steps)
     device = utils.init_distributed_device(args)
     if args.distributed:
         _logger.info(
@@ -601,8 +593,22 @@ def main():
     else:
         _logger.info(f'Training with a single process on 1 device ({args.device}).')
     assert args.rank >= 0
+    use_amp = None
+    amp_dtype = torch.float16
+    if args.amp:
+        if args.amp_impl == 'apex':
+            assert has_apex, 'AMP impl specified as APEX but APEX is not installed.'
+            use_amp = 'apex'
+            assert args.amp_dtype == 'float16'
+        else:
+            assert has_native_amp, 'Please update PyTorch to a version with native AMP (or use APEX).'
+            use_amp = 'native'
+            assert args.amp_dtype in ('float16', 'bfloat16')
+        if args.amp_dtype == 'bfloat16':
+            amp_dtype = torch.bfloat16
 
     utils.random_seed(args.seed, args.rank)
+
     if args.fuser:
         utils.set_jit_fuser(args.fuser)
     if args.fast_norm:
@@ -639,7 +645,7 @@ def main():
     if args.data and not args.data_dir:
         args.data_dir = args.data
     input_img_mode = args.input_img_mode if args.input_img_mode is not None else ('RGB' if data_config['input_size'][0] == 3 else 'L')
-
+   
     dataset_train = create_dataset(
         args.dataset,
         root=args.data_dir,
@@ -655,32 +661,6 @@ def main():
         target_key=args.target_key,
         num_samples=args.train_num_samples,
     )
-    # create_loader_scale is presumably a custom loader that reads scale info from CSV
-    loader_train = create_loader_scale(
-        csv_file = CSV_FILE,
-        root_dir = ROOT_DIR,
-        mask_look_up_json = MASK_LOOKUP_JSON,
-        root = args.data_dir, 
-        input_size=data_config['input_size'],
-        batch_size=args.batch_size,
-        is_training=True,
-        no_aug=args.no_aug,
-        train_crop_mode=args.train_crop_mode,
-        hflip=args.hflip,
-        interpolation=data_config['interpolation'],
-        scale=args.scale,
-        mean=data_config['mean'],
-        std=data_config['std'],
-        num_workers=args.workers,
-        distributed=args.distributed,
-        pin_memory=False,
-        device=device,
-        use_prefetcher=args.prefetcher,
-        use_multi_epochs_loader=args.use_multi_epochs_loader,
-        worker_seeding=args.worker_seeding,
-    )
-
-    loader_eval = None
     if args.val_split:
         dataset_eval = create_dataset(
             args.dataset,
@@ -695,6 +675,49 @@ def main():
             target_key=args.target_key,
             num_samples=args.val_num_samples,
         )
+    train_interpolation = "bilinear" #args.train_interpolation
+    print(args.scale)
+    if args.no_aug or not train_interpolation:
+        train_interpolation = data_config['interpolation']
+    # create_loader_scale is presumably a custom loader that reads scale info from CSV
+    loader_train = create_loader_scale(
+       dataset_train,
+        input_size=data_config['input_size'],
+        batch_size=args.batch_size,
+        is_training=True,
+        no_aug=args.no_aug,
+        re_prob=0, #args.reprob,
+        re_mode='pixel', # shouldn't matter args.remode,
+        re_count=0, #args.recount,
+        re_split=False, #args.resplit,
+        train_crop_mode=args.train_crop_mode,
+        scale=args.scale, # [1,1]
+        ratio=[1,1],#args.ratio,
+        hflip=args.hflip,
+        vflip=0, #args.vflip,
+        color_jitter=None,#args.color_jitter,
+        color_jitter_prob=None, #args.color_jitter_prob,
+        grayscale_prob=None, #args.grayscale_prob,
+        gaussian_blur_prob=None, #args.gaussian_blur_prob,
+        auto_augment=None, #args.aa,
+        num_aug_repeats=0, #args.aug_repeats,
+        num_aug_splits=0,
+        interpolation=train_interpolation,
+        mean=data_config['mean'],
+        std=data_config['std'],
+        num_workers=args.workers,
+        distributed=args.distributed,
+        collate_fn=None,
+        pin_memory=False, #args.pin_mem,
+        device=device,
+        use_prefetcher=args.prefetcher,
+        use_multi_epochs_loader=args.use_multi_epochs_loader,
+        worker_seeding=args.worker_seeding,
+    )
+
+    loader_eval = None
+    if args.val_split:
+   
         eval_workers = args.workers
         if args.distributed and ('tfds' in args.dataset or 'wds' in args.dataset):
             eval_workers = min(2, args.workers)
@@ -734,6 +757,18 @@ def main():
     )
 
     start_epoch = 0
+    resume_epoch = None 
+    if args.start_epoch is not None:
+        # a specified start_epoch will always override the resume epoch
+        start_epoch = args.start_epoch
+    if resume_epoch is not None:
+        start_epoch = resume_epoch
+    if lr_scheduler is not None and start_epoch > 0:
+        
+        #if args.sched_on_updates:
+        #    lr_scheduler.step_update(start_epoch * updates_per_epoch)
+        #else:
+        lr_scheduler.step(start_epoch)
 
     # Setup checkpoint saver
     best_metric = None
@@ -765,6 +800,7 @@ def main():
     
     if True:
         for epoch in range(start_epoch, num_epochs):
+            print(f"Epoch {epoch}")
             if hasattr(dataset_train, 'set_epoch'):
                 dataset_train.set_epoch(epoch)
             elif args.distributed and hasattr(loader_train.sampler, 'set_epoch'):

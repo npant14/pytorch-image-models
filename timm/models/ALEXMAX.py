@@ -344,7 +344,84 @@ class C_scoring(nn.Module):
 
 import torch
 import torch.nn as nn
+class S1_VGG_Big(nn.Module):
+    def __init__(self):
+        super(S1_VGG_Big, self).__init__()
+        # Replace kernel_size=11, stride=4 with multiple 3x3 convs
+        self.layer1 = nn.Sequential(
+            # First conv with stride 2
+            nn.Conv2d(3, 48, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(48),
+            nn.ReLU(),
+            # Second conv
+            nn.Conv2d(48, 48, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(48),
+            nn.ReLU(),
+            # Third conv with stride 2
+            nn.Conv2d(48, 96, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(96),
+            nn.ReLU()
+        )
 
+    def forward(self, x_pyramid):
+        return [self.layer1(x) for x in x_pyramid]
+
+class S1_VGG_Small(nn.Module):
+    def __init__(self):
+        super(S1_VGG_Small, self).__init__()
+        # Replace kernel_size=9, stride=4 with multiple 3x3 convs
+        self.layer1 = nn.Sequential(
+            # First conv with stride 2
+            nn.Conv2d(3, 48, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(48),
+            nn.ReLU(),
+            # Second conv with stride 2
+            nn.Conv2d(48, 96, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(96),
+            nn.ReLU()
+        )
+
+    def forward(self, x_pyramid):
+        return [self.layer1(x) for x in x_pyramid]
+
+class S2_VGG(nn.Module):
+    def __init__(self):
+        super(S2_VGG, self).__init__()
+        # Replace kernel_size=5 with two 3x3 convs
+        self.layer = nn.Sequential(
+            nn.Conv2d(96, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+
+    def forward(self, x_pyramid):
+        return [self.layer(x) for x in x_pyramid]
+
+class S3_VGG(nn.Module):
+    def __init__(self):
+        super(S3_VGG, self).__init__()
+        # Add more 3x3 convs for increased depth
+        self.layer = nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 384, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(384),
+            nn.ReLU(),
+            nn.Conv2d(384, 384, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(384),
+            nn.ReLU(),
+            nn.Conv2d(384, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+
+    def forward(self, x_pyramid):
+        return [self.layer(x) for x in x_pyramid]
+    
 class ALEXMAX_v0(nn.Module):
     def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False,pyramid=False):
         self.num_classes = num_classes

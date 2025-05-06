@@ -29,8 +29,8 @@ _model_with_tags: Dict[str, List[str]] = defaultdict(list)  # shortcut to map ea
 _module_to_deprecated_models: Dict[str, Dict[str, Optional[str]]] = defaultdict(dict)
 _deprecated_models: Dict[str, Optional[str]] = {}
 
-print(_model_entrypoints)
-print("printed the model entrypoints(?)")
+#print(_model_entrypoints)
+#print("printed the model entrypoints(?)")
 
 def split_model_name_tag(model_name: str, no_tag: str = '') -> Tuple[str, str]:
     model_name, *tag_list = model_name.split('.', 1)

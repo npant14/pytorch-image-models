@@ -3,7 +3,10 @@
 Hacked together by / Copyright 2021, Ross Wightman
 """
 import os
+import logging
 from typing import Optional
+
+_logger = logging.getLogger(__name__)
 
 from torchvision.datasets import CIFAR100, CIFAR10, MNIST, KMNIST, FashionMNIST, ImageFolder
 try:
@@ -27,7 +30,7 @@ try:
 except ImportError:
     has_imagenet = False
 
-from .dataset import IterableImageDataset, ImageDataset
+from .dataset import IterableImageDataset, ImageDataset, ScaledImagenetDataset
 
 _TORCH_BASIC_DS = dict(
     cifar10=CIFAR10,
@@ -145,6 +148,18 @@ def create_dataset(
             if split in _EVAL_SYNONYM:
                 split = 'val'
             ds = ImageNet(split=split, root=torch_kwargs['root'])
+        elif name == 'imagenet_scale':
+            # Align behaviour with standard ImageNet handling: if the user points `root` at the
+            # top-level ImageNet directory (containing `train`, `val`, etc.), automatically
+            # descend into the correct sub-folder for the requested split. This prevents the
+            # dataset from inadvertently scanning *all* splits (which can inflate the dataset
+            # size by a large factor and lead to an excessive number of iterations per epoch).
+
+            if search_split and os.path.isdir(root):
+                root = _search_split(root, split)
+                _logger.info(f"Using root directory for imagenet_scale: {root}")
+
+            ds = ScaledImagenetDataset(split=split, root=root)
         elif name == 'image_folder' or name == 'folder':
             # in case torchvision ImageFolder is preferred over timm ImageDataset for some reason
             if search_split and os.path.isdir(root):

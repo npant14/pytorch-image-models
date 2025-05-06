@@ -17,7 +17,7 @@
 # source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 MODEL=chalexmax_bypass_dl_v2
-SCALE_BANDS=5
+SCALE_BANDS=3
 ALPHA=10
 CL_LAMBDA=0.1
 echo "Starting experiment"
@@ -25,7 +25,7 @@ sh distributed_stu_dl.sh 1 train_skeleton_dl.py \
     --data-dir /oscar/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $MODEL \
-    --model-kwargs ip_scale_bands=$SCALE_BANDS classifier_input_size=9216 \
+    --model-kwargs ip_scale_bands=5 classifier_input_size=9216 \
     --scale-bands $SCALE_BANDS \
     --opt sgd \
     -b 256 \

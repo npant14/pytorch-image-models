@@ -71,84 +71,111 @@ with open(wordnet_to_label_txt, 'r') as f:
             wordnet_to_label[parts[0]] = int(parts[1])-1
 
 
-class ScaledImagenetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, mask_lookup_json,root=None, transform=None, crop_size=224):
-        """
-        Args:
-            csv_file (str): Path to CSV file containing metadata.
-            root_dir (str): Root directory containing all images.
-            transform (callable, optional): Transformations applied to samples.
-            crop_size (int): The final crop size used in the transformation (default 224).
-                             The image is first resized to a proportional size.
-                             (Default ratio: 256/224)
-        """
+class ScaledImagenetDataset(data.Dataset):
+    def __init__(
+            self,
+            root,
+            csv_file=None,
+            reader=None,
+            split='train',
+            class_map=None,
+            load_bytes=False,
+            input_img_mode='RGB',
+            transform=None,
+            target_transform=None,
+    ):
+        if reader is None or isinstance(reader, str):
+            reader = create_reader(
+                reader or '',
+                root=root,
+                split=split,
+                class_map=class_map
+            )
         
-        self.data = pd.read_csv(csv_file)
-        self.root_dir = root_dir
+        self.reader = reader
+        self.load_bytes = load_bytes
+        self.input_img_mode = input_img_mode
         self.transform = transform
-        self.crop_size = crop_size
-        with open(mask_lookup_json, 'r') as f:
-            self.mask_lookup = json.load(f)
-        # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
-        self.resize_size = int(round(crop_size * (256 / 224)))
-        self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
-        self.class_map = load_wordnet_to_numeric_mapping(self.class_path)
+        self.target_transform = target_transform
+        self._consecutive_errors = 0
+        self.split = split
         
-    def __len__(self):
-        return len(self.data)
+        if csv_file is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            csv_file = os.path.join(current_dir, '_info', 'foreground_proportions_with_rescaled_centers.csv')
+        
+        # Load the CSV data
+        self.data = pd.read_csv(csv_file)
+        _logger.info(f"Loaded {len(self.data)} samples from CSV file")
+        
+        # Get the list of files in the current split
+        split_files = set(self.reader.filenames(basename=True))
+        _logger.info(f"Found {len(split_files)} files in {split} split")
+        
+        # For validation set, we don't need to filter the CSV data
+        # since we'll use default values for scale band and center
+        if split != 'val':
+            self.data = self.data[self.data['Image File'].isin(split_files)]
+            _logger.info(f"Filtered CSV data to {len(self.data)} samples matching {split} split")
+        
+        _logger.info(f"Dataset contains {len(self.reader)} total samples")
 
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
+    def __getitem__(self, index):
+        img, target = self.reader[index]
 
-        img_file = self.data.iloc[idx, 0]  # Image File
-        scale_band = int(self.data.iloc[idx, 9])  # Scale Band
-        center_x = float(self.data.iloc[idx, 7])  # Cropped center X
-        center_y = float(self.data.iloc[idx, 8])  # Cropped center Y
+        try:
+            img = img.read() if self.load_bytes else Image.open(img)
+        except Exception as e:
+            _logger.warning(f'Skipped sample (index {index}, file {self.reader.filename(index)}). {str(e)}')
+            self._consecutive_errors += 1
+            if self._consecutive_errors < _ERROR_RETRY:
+                return self.__getitem__((index + 1) % len(self.reader))
+            else:
+                raise e
+                
+        filename = self.reader.filename(index)
+        fname = filename.split('/')[-1]
         
-        if img_file not in self.mask_lookup:
-            raise FileNotFoundError(f"Image file {img_file} not found in mask lookup JSON.")
+        # For validation set, use default values
+        if self.split == 'val':
+            scale_band = 3
+            center_x = 0.5
+            center_y = 0.5
+        else:
+            # For training set, get values from CSV
+            if fname in self.data['Image File'].values:
+                scale_band = int(self.data[self.data['Image File'] == fname]['Scale Band'].iloc[0])
+                center_x = float(self.data[self.data['Image File'] == fname]['Cropped center X'].iloc[0])
+                center_y = float(self.data[self.data['Image File'] == fname]['Cropped center Y'].iloc[0])
+            else:
+                scale_band = 3
+                center_x = 0.5
+                center_y = 0.5
         
-        img_path = self.mask_lookup[img_file]["image_path"]
-        mask_path = self.mask_lookup[img_file]["mask_path"]
-        
-        wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
-        class_label = wordnet_to_label.get(wordnet_id, "Unknown")
-        #ignore unknown
-        if class_label == "Unknown":
-            return self.__getitem__(idx + 1)
-        if class_label == 1000:
-            return self.__getitem__(idx + 1)
-        if not os.path.exists(img_path):
-            img_path = img_path.replace("/gpfs/data/tserre/npant1/ILSVRC/","/oscar/data/tserre/npant1/ILSVRC/")
-        
-        image = Image.open(img_path).convert("RGB")
-        mask_data = np.load(mask_path)
-        mask = mask_data[mask_data.files[0]]
+        self._consecutive_errors = 0
 
-        if self.transform:
-            image = self.transform(image)
-            mask = Image.fromarray(mask).convert("L")
-            mask = transforms.Resize((322, 322))(mask)
-            mask = torch.tensor(np.array(mask), dtype=torch.float32)
-            mask = torch.stack([mask] * 3, dim=0)
-        
+        if self.input_img_mode and not self.load_bytes:
+            img = img.convert(self.input_img_mode)
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if target is None:
+            target = -1
+        elif self.target_transform is not None:
+            target = self.target_transform(target)
+
         center = torch.tensor([center_x, center_y], dtype=torch.float32)
-        
-        sample = {
-            'image': image,
-            'mask': mask,
-            'scale_band': scale_band,
-            'center': center,
-            'target': class_label
-        }
-        
-        input = sample['image']#(sample['image'], sample['mask'], sample['scale_band'], sample['resized_center'])
-        # make input a tensor
-        
-        target = sample['target']
-        
-        return input, target ,sample['scale_band'],sample['center']
+
+        return img, target, scale_band, center
+
+    def __len__(self):
+        return len(self.reader)
+
+    def filename(self, index, basename=False, absolute=False):
+        return self.reader.filename(index, basename, absolute)
+
+    def filenames(self, basename=False, absolute=False):
+        return self.reader.filenames(basename, absolute)
 
 
 class ImageDataset(data.Dataset):
