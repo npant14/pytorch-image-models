@@ -2810,6 +2810,20 @@ def chresmax_v3_1(pretrained=False, **kwargs):
     model = CHRESMAX_V3_1(**kwargs)
     return model
 
+@register_model
+def chresmax_v3_bypass_only(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_bypass_only(**kwargs)
+    return model
 
 @register_model
 def chresmax_v3_2(pretrained=False, **kwargs):
