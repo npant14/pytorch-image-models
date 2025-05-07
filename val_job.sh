@@ -11,8 +11,11 @@ bypass=${7:-False}
 image_scales=${8:-"322"}  # Default is a single scale, but can now take a list like "160 192 227 270"
 time_limit=${9:-"3:00:00"}  # Default: 3 hours or "local"
 ckpt_dir=${10:-""}
-results_dir=${11:-"/oscar/data/tserre/xyu110/pytorch-output/validation"}
+padding_mode=${11:-"constant"}
 partition=${12:-"gpu"}  # "gpu", "gpu-he", "gracehopper"
+results_dir=${13:-"/oscar/data/tserre/xyu110/pytorch-output/validation"}
+
+
 
 # Process the image_scales parameter
 # If it contains spaces, it's a list of scales to loop through
@@ -29,8 +32,8 @@ cpu_per_gpu=1
 mem_per_gpu=8
 
 if [ "${partition}" = "gpu-he" ]; then
-    cpu_per_gpu=2
-    mem_per_gpu=64
+    cpu_per_gpu=4
+    mem_per_gpu=48
 fi
 
 cpus=$((gpus * cpu_per_gpu))
@@ -81,6 +84,7 @@ for image_scale in "${scales[@]}"; do
     sed -i "s|CKPT_DIR_VALUE|${ckpt_dir}|g" $temp_script
     sed -i "s/CPU_COUNT/${cpus}/g" $temp_script
     sed -i "s|PARTITION_VALUE|${partition}|g" $temp_script
+    sed -i "s|PADDING_MODE_VALUE|${padding_mode}|g" $temp_script
 
 
     # Run based on the mode

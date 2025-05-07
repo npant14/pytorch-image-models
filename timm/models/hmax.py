@@ -310,9 +310,9 @@ class HMAX_latest(nn.Module):
 
     def _get_s4_input_channels(self):
         c1_ch = len(self.c1.sp_kernel_size) * self.n_ori
-        c2_ch = len(self.c2.sp_kernel_size) * 100
-        c3_ch = len(self.c3.sp_kernel_size) * 100
-        c2b_ch = len(self.s2b.kernel_size) * len(self.c2b.sp_kernel_size) * 100
+        c2_ch = len(self.c2.sp_kernel_size) * 64
+        c3_ch = len(self.c3.sp_kernel_size) * 64
+        c2b_ch = len(self.s2b.kernel_size) * len(self.c2b.sp_kernel_size) * 64
         return c1_ch + c2_ch + c3_ch + c2b_ch
 
     def _prepare_block(self, x):

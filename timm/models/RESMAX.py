@@ -1358,20 +1358,6 @@ class RESMAX_V2_bypass_only(nn.Module):
                 nn.ReLU(inplace=True)
             )
 
-        self.s3 = S3_Res()
-        if self.ip_scale_bands > 4:
-            self.global_pool = C_scoring2_optimized(
-                num_channels=256,
-                pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
-                pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
-                resize_kernel_1=3,
-                resize_kernel_2=1,
-                skip=2,
-                global_scale_pool=False
-            )
-        else:
-            self.global_pool = C(global_scale_pool=True)
-
         self.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(classifier_input_size, 4096),
@@ -1450,7 +1436,6 @@ class RESMAX_V2_bypass_only(nn.Module):
             print(f"{name:30s} | {count:10,d} | {pct:10.2f}%")
         print("-" * 60)
         print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
-
 
 
 class CHRESMAX_V3_bypass_only(nn.Module):
@@ -2165,6 +2150,99 @@ class CHRESMAX_V3_3(nn.Module):
 
         return stream_1_output, correct_scale_loss
 
+class CHRESMAX_V3_A(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+
+    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+    the returned features are [0] for C1 and C2.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def forward(self, x):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
+
+        # stream 2 (random scale)
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        else:
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+
+        # Cosine similarity loss for C1
+        c1_correct_scale_loss = 0
+        for i in range(len(stream_1_c1_feats)):
+            c1 = F.cosine_similarity(stream_1_c1_feats[i].flatten(1), stream_2_c1_feats[i].flatten(1), dim=1)
+            c1_correct_scale_loss += torch.mean(1 - c1)
+        c1_correct_scale_loss /= len(stream_1_c1_feats)
+
+        # Cosine similarity loss for C2
+        c2_correct_scale_loss = 0
+        for i in range(len(stream_1_c2_feats)):
+            c2 = F.cosine_similarity(stream_1_c2_feats[i].flatten(1), stream_2_c2_feats[i].flatten(1), dim=1)
+            c2_correct_scale_loss += torch.mean(1 - c2)
+        c2_correct_scale_loss /= len(stream_1_c2_feats)
+
+        # Cosine similarity loss for output
+        out_cosine_loss = 1 - F.cosine_similarity(stream_1_output, stream_2_output, dim=1).mean()
+
+        # Optional bypass loss
+        if self.bypass:
+            bypass_cosine_loss = 1 - F.cosine_similarity(stream_1_bypass, stream_2_bypass, dim=1).mean()
+        else:
+            bypass_cosine_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_cosine_loss + bypass_cosine_loss
+
+        return stream_1_output, correct_scale_loss
+
+
 """
 In V4, we use new loss clip loss. also use reflect for padding
 """
@@ -2591,7 +2669,7 @@ class ContrastiveRESMAX(nn.Module):
         return out1, total_loss
 
 # Create a new model for contrastive fine-tuning
-class ContrastiveRESMAXV1(nn.Module):
+class ContrastiveRESMAX_V1(nn.Module):
     def __init__(self,
                 num_classes=1000,
                 in_chans=3,
@@ -2753,6 +2831,145 @@ class ContrastiveRESMAXV1(nn.Module):
                             
         return out1, total_loss
 
+"""Distillation, KL loss"""
+class ContrastiveRESMAX_V2(nn.Module):
+    def __init__(self,
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=9216,
+                 contrastive_loss=True,
+                 bypass=False,
+                 pretrained_path=None,
+                 temperature=0.1,
+                 use_kl_loss=True,
+                 kl_loss_weight=0.5,
+                 **kwargs):
+        super().__init__()
+
+        self.num_classes = num_classes
+        self.contrastive_loss = contrastive_loss
+        self.temperature = temperature
+        self.use_kl_loss = use_kl_loss
+        self.kl_loss_weight = kl_loss_weight
+        self.ip_scale_bands = ip_scale_bands
+
+        pretrained_path = f'/oscar/data/tserre/xyu110/pytorch-output/train/0/models_w_aug/ip_3_resmax_v2_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_]_bypass_scale_0.08/model_best.pth.tar'
+
+        # Backbone model
+        self.backbone = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+        checkpoint = torch.load(pretrained_path, weights_only=False, map_location='cpu')
+        if 'state_dict' in checkpoint:
+            self.backbone.load_state_dict(checkpoint['state_dict'], strict=True)
+            print('Loaded state dict from checkpoint if')
+        else:
+            self.backbone.load_state_dict(checkpoint, strict=True)
+            print('Loaded state dict from checkpoint else')
+
+        # Freeze all layers
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        # Selective fine-tuning
+        for param in self.backbone.fc.parameters():
+            param.requires_grad = True
+        for param in self.backbone.fc1.parameters():
+            param.requires_grad = True
+        for param in self.backbone.fc2.parameters():
+            param.requires_grad = True
+        for param in self.backbone.s3.parameters():
+            param.requires_grad = True
+        for param in self.backbone.global_pool.parameters():
+            param.requires_grad = True
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+
+        # ======== Get frozen output for KL divergence ========
+        with torch.no_grad():
+            teacher_out, *_ = self.backbone(x)
+            teacher_log_probs = F.log_softmax(teacher_out / self.temperature, dim=1)
+
+        # ======== Forward pass through current model ========
+        if self.backbone.bypass:
+            out1, c1_feats1, c2_feats1, bypass1 = self.backbone(x)
+        else:
+            out1, c1_feats1, c2_feats1 = self.backbone(x)
+
+        # ======== Scaled input ========
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+        else:
+            center_crop = transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+
+        if self.backbone.bypass:
+            out2, c1_feats2, c2_feats2, bypass2 = self.backbone(x_rescaled)
+        else:
+            out2, c1_feats2, c2_feats2 = self.backbone(x_rescaled)
+
+        # ======== NT-Xent (InfoNCE) Loss Function ========
+        def nt_xent_loss(f1, f2, temperature=self.temperature):
+            if len(f1.shape) > 2:
+                f1 = f1.reshape(f1.size(0), -1)
+                f2 = f2.reshape(f2.size(0), -1)
+            z1 = F.normalize(f1, dim=1)
+            z2 = F.normalize(f2, dim=1)
+            features = torch.cat([z1, z2], dim=0)
+            sim_matrix = torch.matmul(features, features.T) / temperature
+            pos_mask = torch.zeros_like(sim_matrix)
+            pos_mask[:batch_size, batch_size:] = torch.eye(batch_size)
+            pos_mask[batch_size:, :batch_size] = torch.eye(batch_size)
+            self_mask = torch.eye(2 * batch_size, device=sim_matrix.device)
+            logits_mask = torch.ones_like(sim_matrix) - self_mask
+            exp_logits = torch.exp(sim_matrix) * logits_mask
+            log_prob = sim_matrix - torch.log(exp_logits.sum(dim=1, keepdim=True))
+            mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)
+            return -mean_log_prob_pos.mean()
+
+        # Contrastive losses from features
+        def calc_contrastive_loss(f1_list, f2_list):
+            if isinstance(f1_list, list):
+                total = sum(nt_xent_loss(f1, f2) for f1, f2 in zip(f1_list, f2_list))
+                return total / len(f1_list)
+            else:
+                return nt_xent_loss(f1_list, f2_list)
+
+        c1_contrastive_loss = calc_contrastive_loss(c1_feats1, c1_feats2)
+        c2_contrastive_loss = calc_contrastive_loss(c2_feats1, c2_feats2)
+        out_contrastive_loss = nt_xent_loss(out1, out2)
+
+        if self.backbone.bypass:
+            bypass_contrastive_loss = nt_xent_loss(bypass1, bypass2)
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss + 0.1 * bypass_contrastive_loss
+        else:
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss
+
+        # ======== KL Divergence Loss ========
+        if self.use_kl_loss:
+            student_probs = F.softmax(out1 / self.temperature, dim=1)
+            kl_loss = F.kl_div(teacher_log_probs, student_probs, reduction='batchmean') * (self.temperature ** 2)
+            total_loss = contrastive_total + self.kl_loss_weight * kl_loss
+        else:
+            total_loss = contrastive_total
+
+        return out1, total_loss
+
+
 @register_model
 def resmax_v2(pretrained=False, **kwargs):
     #deleting some kwargs that are messing up training
@@ -2886,6 +3103,22 @@ def chresmax_v3_gray(pretrained=False, **kwargs):
     return model
 
 @register_model
+def chresmax_v3_a(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_A(**kwargs)
+    return model
+
+
+@register_model
 def chresmax_v4(pretrained=False, **kwargs):
     """
     Registry function to create a CHALEXMAX_V3_3_optimized model
@@ -2948,5 +3181,23 @@ def contrastive_resmaxv1(pretrained=False, **kwargs):
     if pretrained:
         pass
     
-    model = ContrastiveRESMAXV1(**kwargs)
+    model = ContrastiveRESMAX_V1(**kwargs)
+    return model
+
+@register_model
+def ft_resmax_v2(pretrained=False, **kwargs):
+    """
+    Registry function to create a ContrastiveRESMAX model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    if pretrained:
+        pass
+    
+    model = ContrastiveRESMAX_V2(**kwargs)
     return model
