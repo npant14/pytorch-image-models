@@ -2371,12 +2371,6 @@ class CHRESMAX_V4(nn.Module):
 In V5 uses V3 Resmax, performance not good
 """ 
     
-<<<<<<< HEAD
-class CHRESMAX_V3(nn.Module):
-    """
-    Example student-teacher style model with scale-consistency loss,
-    using RESMAX_V2 as the backbone.
-=======
 class CHRESMAX_V5(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
@@ -2385,39 +2379,26 @@ class CHRESMAX_V5(nn.Module):
     In V4, we use new loss clip loss. also use reflect for padding
     In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
     the returned features are [0] for C1 and C2.
->>>>>>> xizheng
     """
     def __init__(self, 
                  num_classes=1000,
                  in_chans=3,
                  ip_scale_bands=1,
-<<<<<<< HEAD
-                 classifier_input_size=13312,
-                 contrastive_loss=True,
-                 bypass=False,
-=======
                  classifier_input_size=512,
                  contrastive_loss=True,
                  bypass=False,
                  temperature=0.1,
->>>>>>> xizheng
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.ip_scale_bands = ip_scale_bands
-<<<<<<< HEAD
-        
-        # Use the optimized backbone
-        self.model_backbone = RESMAX_V2(
-=======
         self.bypass = bypass
         self.temperature = temperature
         
         # Use the optimized backbone
         self.backbone = RESMAX_V3(
->>>>>>> xizheng
             num_classes=num_classes,
             in_chans=in_chans,
             ip_scale_bands=self.ip_scale_bands,
@@ -2427,17 +2408,6 @@ class CHRESMAX_V5(nn.Module):
         )
 
     def forward(self, x):
-<<<<<<< HEAD
-        """
-        Creates two streams (original + random-scaled) for scale-consistency training.
-        Returns:
-            (output_of_stream1, correct_scale_loss)
-        """
-        # stream 1 (original scale)
-        stream_1_output, stream_1_c1_feats, stream_1_c2_feats = self.model_backbone(x)
-
-        # stream 2 (random scale)
-=======
         batch_size = x.shape[0]
         
         # Original input - full forward pass
@@ -2447,7 +2417,6 @@ class CHRESMAX_V5(nn.Module):
             out1, c1_feats1, c2_feats1 = self.backbone(x)
         
         # Randomly scaled input
->>>>>>> xizheng
         scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
         scale_factor = random.choice(scale_factor_list)
         img_hw = x.shape[-1]
@@ -2456,134 +2425,6 @@ class CHRESMAX_V5(nn.Module):
 
         if new_hw <= img_hw:
             # pad if smaller
-<<<<<<< HEAD
-            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
-        else:
-            # center-crop if bigger
-            center_crop = torchvision.transforms.CenterCrop(img_hw)
-            x_rescaled = center_crop(x_rescaled)
-
-        # forward pass on the scaled input
-        stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
-
-        # scale-consistency loss
-        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats - stream_2_c1_feats))
-        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats - stream_2_c2_feats))
-        
-        # kl divergence loss for outputs
-        stream_1_log_probs = torch.nn.functional.log_softmax(stream_1_output, dim=-1)
-
-        # Compute probabilities for target
-        stream_2_probs = torch.nn.functional.softmax(stream_2_output, dim=-1)
-
-        # Compute KLDivLoss
-        out_correct_scale_loss = torch.nn.KLDivLoss(reduction='batchmean')(stream_1_log_probs, stream_2_probs)
-        #out_correct_scale_loss = torch.nn.KLDivLoss(reduction='batchmean')(torch.log(stream_1_output), stream_2_output) 
-        
-        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss
-
-        return stream_1_output, correct_scale_loss
-
-class CHRESMAX_V4(nn.Module):
-    """
-    Example student-teacher style model with scale-consistency loss,
-    using RESMAX_V2 as the backbone.
-    """
-    def __init__(self, 
-                 num_classes=1000,
-                 in_chans=3,
-                 ip_scale_bands=1,
-                 classifier_input_size=13312,
-                 contrastive_loss=True,
-                 bypass=True,
-                 **kwargs):
-        super().__init__()
-        self.contrastive_loss = contrastive_loss
-        self.num_classes = num_classes
-        self.in_chans = in_chans
-        self.ip_scale_bands = ip_scale_bands
-        self.bypass = bypass
-        
-        # Use the optimized backbone
-        self.model_backbone = RESMAX_V2(
-            num_classes=num_classes,
-            in_chans=in_chans,
-            ip_scale_bands=self.ip_scale_bands,
-            classifier_input_size=classifier_input_size,
-            contrastive_loss=self.contrastive_loss,
-            bypass=self.bypass,
-        )
-
-    def forward(self, x):
-        """
-        Creates two streams (original + random-scaled) for scale-consistency training.
-        Returns:
-            (output_of_stream1, correct_scale_loss)
-        """
-        # stream 1 (original scale)
-        if self.bypass:
-            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = self.model_backbone(x)
-        else:
-            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = self.model_backbone(x)
-
-        # stream 2 (random scale)
-        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
-        scale_factor = random.choice(scale_factor_list)
-        img_hw = x.shape[-1]
-        new_hw = int(img_hw * scale_factor)
-        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
-
-        if new_hw <= img_hw:
-            # pad if smaller
-            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
-        else:
-            # center-crop if bigger
-            center_crop = torchvision.transforms.CenterCrop(img_hw)
-            x_rescaled = center_crop(x_rescaled)
-
-        # forward pass on the scaled input
-        if self.bypass: 
-            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = self.model_backbone(x_rescaled)
-        else:
-            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = self.model_backbone(x_rescaled)
-
-        # scale-consistency loss
-        c1_correct_scale_loss = torch.mean(torch.abs(stream_1_c1_feats.detach()  - stream_2_c1_feats))
-        c2_correct_scale_loss = torch.mean(torch.abs(stream_1_c2_feats.detach() - stream_2_c2_feats))
-        
-        # kl divergence loss for outputs
-        stream_1_log_probs = torch.nn.functional.log_softmax(stream_1_output, dim=-1)
-
-        # Compute probabilities for target
-        stream_2_probs = torch.nn.functional.log_softmax(stream_2_output, dim=-1)
-        if self.bypass:
-            bypass_loss = torch.mean(torch.abs(stream_1_bypass.detach() - stream_2_bypass))
-        else:
-            bypass_loss = 0
-
-        # Compute KLDivLoss
-        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output.detach() - stream_2_output))
-        
-        #out_correct_scale_loss = torch.nn.KLDivLoss(reduction='batchmean')(torch.log(stream_1_output), stream_2_output) 
-        
-        correct_scale_loss = c1_correct_scale_loss/3.0 + c2_correct_scale_loss/3.0 + 0.01 * out_correct_scale_loss + bypass_loss/3.0
-
-        return stream_1_output, correct_scale_loss
-
-@register_model
-def resmax(pretrained=False, **kwargs):
-    #deleting some kwargs that are messing up training
-    try:
-        del kwargs["pretrained_cfg"]
-        del kwargs["pretrained_cfg_overlay"]
-        del kwargs["drop_rate"]
-    except:
-        pass
-    model = RESMAX(**kwargs)
-    if pretrained:
-        pass
-    return model
-=======
             # 'constant', 'reflect', 'replicate' or 'circular'. Default: 'constant'
             x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw), mode='reflect')
         else:
@@ -2596,7 +2437,6 @@ def resmax(pretrained=False, **kwargs):
             out2, c1_feats2, c2_feats2, bypass2 = self.backbone(x_rescaled)
         else:
             out2, c1_feats2, c2_feats2 = self.backbone(x_rescaled)
->>>>>>> xizheng
 
 
         def clip_style_loss(z1, z2, temperature=self.temperature):
