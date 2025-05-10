@@ -34,7 +34,7 @@ cpu_per_gpu=1
 mem_per_gpu=8
 
 if [ "${partition}" = "gpu-he" ]; then
-    cpu_per_gpu=2
+    cpu_per_gpu=4
     mem_per_gpu=16
 fi
 

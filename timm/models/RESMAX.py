@@ -2961,8 +2961,9 @@ class ContrastiveRESMAX_V2(nn.Module):
 
         # ======== KL Divergence Loss ========
         if self.use_kl_loss:
-            student_probs = F.softmax(out1 / self.temperature, dim=1)
-            kl_loss = F.kl_div(teacher_log_probs, student_probs, reduction='batchmean') * (self.temperature ** 2)
+            student_log_probs = F.log_softmax(out1 / self.temperature, dim=1)
+            teacher_probs = F.softmax(teacher_out / self.temperature, dim=1)
+            kl_loss = F.kl_div(student_log_probs, teacher_probs, reduction='batchmean') * (self.temperature ** 2)
             total_loss = contrastive_total + self.kl_loss_weight * kl_loss
         else:
             total_loss = contrastive_total
