@@ -259,7 +259,7 @@ group.add_argument('--epochs', type=int, default=300, metavar='N',
 group.add_argument('--epoch-repeats', type=float, default=0., metavar='N',
                    help='epoch repeat multiplier (number of times to repeat dataset epoch per train epoch).')
 group.add_argument('--start-epoch', default=None, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
+                   help='manual epoch number (useful on restarts)')
 # group.add_argument('--decay-milestones', default=[90, 180, 270], type=int, nargs='+', metavar="MILESTONES",
 #                    help='list of decay epoch indices for multistep lr. must be increasing')
 group.add_argument('--decay-epochs', type=float, default=90, metavar='N',
@@ -895,18 +895,17 @@ def main():
             **scheduler_kwargs(args, decreasing_metric=decreasing_metric),
             updates_per_epoch=updates_per_epoch,
         )
-    
-    if args.start_epoch is not None:
-        # a specified start_epoch will always override the resume epoch
-        start_epoch = args.start_epoch
-    elif resume_epoch is not None:
-        start_epoch = resume_epoch
-    if lr_scheduler is not None and start_epoch > 0:
-        
-        #if args.sched_on_updates:
-        #    lr_scheduler.step_update(start_epoch * updates_per_epoch)
-        #else:
-        lr_scheduler.step(start_epoch)
+    start_epoch = 0
+    # if args.start_epoch is not None:
+    #     # a specified start_epoch will always override the resume epoch
+    #     start_epoch = args.start_epoch
+    # elif resume_epoch is not None:
+    #     start_epoch = resume_epoch
+    # if lr_scheduler is not None and start_epoch > 0:
+    #     if args.sched_on_updates:
+    #         lr_scheduler.step_update(start_epoch * updates_per_epoch)
+    #     else:
+    #         lr_scheduler.step(start_epoch)
 
     if utils.is_primary(args):
         if args.add_wrapped_schedulefree:

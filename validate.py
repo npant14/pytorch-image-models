@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import time
+from tqdm import tqdm
 from collections import OrderedDict
 from contextlib import suppress
 from functools import partial
@@ -326,32 +327,48 @@ def validate(args):
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     print("image size:", args.image_scale)
 
-    # take one image from the loader
-    sample_image, _ = next(iter(loader))
+    visualize = True
 
-    #####PADDING FOR VALIDATION################
-    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
-    loader = DataLoaderTransformWrapper(loader, transform)
+    if visualize:
+        desired_class = 207  # golden retriever
+        sample_images = []
 
-    visualize = False
-    if visualize == True:
-        scales = [160, 192, 227, 322, 382, 454]
-        visualize_transforms(sample_image, scales, target_size)
+        # First pass: collect up to 10 images of the desired class
+        i = 0 # batch index
+        for images, targets in tqdm(loader, total=len(loader), desc="Looking for golden retrievers"):
+            i += 1
+            
+            if i < 75:
+                continue
+            
+            for img, label in zip(images, targets):
+                if label.item() == desired_class:
+                    # store with batch dim
+                    sample_images.append(img.unsqueeze(0))
+                    if len(sample_images) == 10:
+                        break
+            if len(sample_images) == 10:
+                break
+
+        if not sample_images:
+            print("No golden retrievers found in the dataset.")
+            return
+
+        scales = [160, 192, 227, 270, 322, 382, 454]
+
+        # Second pass: visualize transforms on each collected sample
+        for idx, sample in enumerate(tqdm(sample_images, desc="Visualizing transforms")):
+            save_path = f"golden_retriever_{idx+1}.png"
+            visualize_transforms(sample, scales, target_size, save_path=save_path)
+            print(f"Saved visualization for sample #{idx+1} → {save_path}")
+
         exit(0)
+
     
-    # import numpy as np
-    # import matplotlib.pyplot as plt
-    
-    # images, _ = next(iter(loader))
-    # images = pad_batch(images, target_size)
-    
-    
-    # img = images[0]
-    # print(f"Image shape: {img.shape}")
-    # img_np = img.permute(1, 2, 0).cpu().numpy()
-    # img_np = np.clip(img_np, 0, 1)
-    # plt.imsave('sample_image.png', img_np)
-    # exit(0)
+    #####PADDING FOR VALIDATION################
+    print("Padding mode:", args.model_kwargs['padding_mode'])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=args.model_kwargs['padding_mode'])
+    loader = DataLoaderTransformWrapper(loader, transform)
 
 
     batch_time = AverageMeter()

@@ -1,12 +1,11 @@
 #!/bin/bash
 #SBATCH --time=TIME_LIMIT
-#SBATCH -p gpu --gres=gpu:GPU_COUNT
-#SBATCH -n GPU_COUNT
+#SBATCH --partition=PARTITION_VALUE --gres=gpu:GPU_COUNT
+#SBATCH -n CPU_COUNT
 #SBATCH -N 1
 #SBATCH --mem=60GB
 #SBATCH -o VAL_JOB_NAME.out
 #SBATCH -e VAL_JOB_NAME.err
-#SBATCH --account=carney-tserre-condo
 #SBATCH -J VAL_JOB_NAME
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
@@ -22,7 +21,7 @@ DATASET="torch/imagenet"
 MODEL="MODEL_NAME"
 CLASSIFIER_INPUT_SIZE=CLS_INPUT_SIZE
 CL_LAMBDA=CL_LAMBDA_VALUE
-INPUT_SIZE="3 332 332"
+INPUT_SIZE="3 322 322"
 GPUS=GPU_COUNT
 BATCH_SIZE=BATCH_SIZE_VALUE
 IP_BANDS=IP_BANDS_VALUE
@@ -30,13 +29,14 @@ BYPASS=BYPASS_VALUE
 BYPASS_STR=BYPASS_STR_VALUE
 IMAGE_SCALE="IMAGE_SCALE_VALUE"
 RESULTS_DIR="RESULTS_DIR_VALUE"
-CPUS=CPU_VALUE
+CPUS=CPU_COUNT
+PADDING_MODE=PADDING_MODE_VALUE
 
 # MODEL_PTH_USED="model_best"
 if [ $MODEL = "contrastive_resmaxv1" ]; then
     MODEL_PTH_USED="model_best"
 else
-    MODEL_PTH_USED="last"
+    MODEL_PTH_USED="model_best"
 fi
 
 
@@ -47,16 +47,17 @@ else
 fi
 
 mkdir -p $RESULTS_DIR
+results_file="${RESULTS_DIR}/baseline_woaug_${MODEL_PTH_USED}_${PADDING_MODE}.csv"
 
 # Run validation for specified parameters
 sh distributed_val.sh $GPUS validate.py \
     --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
     --model $MODEL \
     -b $BATCH_SIZE \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA\
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE\
     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
     --input-size $INPUT_SIZE \
     --pretrained \
     --checkpoint $CHECKPOINT_PATH \
-    --results-file ${RESULTS_DIR}/validation0401_${MODEL_PTH_USED}.csv \
+    --results-file $results_file \
     --workers $CPUS

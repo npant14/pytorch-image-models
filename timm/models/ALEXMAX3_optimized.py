@@ -146,6 +146,7 @@ class C_scoring2_optimized(nn.Module):
             scores = torch.stack([score_a, score_b], dim=1)  # => [N, 2, 1, H', W']
             feats = torch.stack([a, b], dim=1)               # => [N, 2, C, H', W']
 
+            del a, b, score_a, score_b
             out_feats.append(soft_selection(scores, feats))
             del a, b, score_a, score_b
             del scores, feats
@@ -220,8 +221,9 @@ class C_scoring2_optimized_debug(nn.Module):
             out_list = [self.pool1(x) for x in x_pyramid]
 
             # We'll iteratively soft-select from out_list[0] through out_list[-1]
-            out_ref = out_list[0]
             final_size = out_list[len(out_list)//2].shape[-2:]  # pick a reference size
+            out_ref = F.interpolate(out_list[0], final_size, mode='bilinear', align_corners=False)
+            out_ref = self.resizing_layers(out_ref)
 
             for i in range(1, len(out_list)):
                 tmp = F.interpolate(out_list[i], final_size, mode='bilinear', align_corners=False)

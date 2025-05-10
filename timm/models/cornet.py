@@ -1,8 +1,9 @@
 from collections import OrderedDict
 from torch import nn
 import math
-from collections import OrderedDict
-from torch import nn
+import torch.nn.functional as F
+import torch
+import numpy as np
 from timm.models.registry import register_model
 
 HASH = '5c427c9c'
@@ -137,6 +138,188 @@ class CORnet_S(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
+
+# copy from HMAX.py     
+def get_ip_scales(num_scale_bands, base_image_size, scale=4):
+    """
+    Generate a list of image scales for multi-scale pyramid input.
+
+    Args:
+        num_scale_bands (int): Number of scale bands (not including center).
+        base_image_size (int): Input image size (e.g., 224).
+        scale (int): Scaling divisor for the exponent.
+
+    Returns:
+        List[int]: List of scale sizes sorted from smallest to largest.
+    """
+    if num_scale_bands % 2 == 1:
+        # Odd bands => symmetric around 0
+        image_scales = np.arange(-num_scale_bands//2 + 1, num_scale_bands//2 + 2)
+    else:
+        # Even bands => slightly asymmetric
+        image_scales = np.arange(-num_scale_bands//2, num_scale_bands//2 + 1)
+
+    # Compute scaled sizes
+    image_scales = [int(np.ceil(base_image_size / (2 ** (i / scale)))) for i in image_scales]
+    image_scales.sort()
+
+    # Sanity check
+    if num_scale_bands > 2:
+        assert len(image_scales) == num_scale_bands + 1, "Mismatch in number of scales generated"
+
+    return image_scales
+
+
+class C(nn.Module):
+    #Spatial then Scale
+    def __init__(self,
+                  pool_func1 = nn.MaxPool2d(kernel_size = 3, stride = 2),
+                  pool_func2 = nn.MaxPool2d(kernel_size = 4, stride = 3),
+                  global_scale_pool=False):
+        super(C, self).__init__()
+        ## TODO: Add arguments for kernel_sizes
+        self.pool1 = pool_func1
+        self.pool2 = pool_func2
+        self.global_scale_pool = global_scale_pool
+
+    def forward(self,x_pyramid):
+        # if only one thing in pyramid, return
+
+        out = []
+        if self.global_scale_pool:
+            if len(x_pyramid) == 1:
+                return self.pool1(x_pyramid[0])
+
+            out = [self.pool1(x) for x in x_pyramid]
+            # resize everything to be the same size
+            final_size = out[len(out) // 2].shape[-2:]
+            out = F.interpolate(out[0], final_size, mode='bilinear')
+            for x in x_pyramid[1:]:
+                temp = F.interpolate(x, final_size, mode='bilinear')
+                out = torch.max(out, temp)  # Out-of-place operation to avoid in-place modification
+                del temp  # Free memory immediately
+
+        else: # not global pool
+
+            if len(x_pyramid) == 1:
+                return [self.pool1(x_pyramid[0])]
+
+            for i in range(0, len(x_pyramid) - 1):
+                x_1 = x_pyramid[i]
+                x_2 = x_pyramid[i+1]
+                #spatial pooling
+                x_1 = self.pool1(x_1)
+                x_2 = self.pool2(x_2)
+                # Then fix the sizing interpolating such that feature points match spatially
+                if x_1.shape[-1] > x_2.shape[-1]:
+                    x_2 = F.interpolate(x_2, size = x_1.shape[-2:], mode = 'bilinear')
+                else:
+                    x_1 = F.interpolate(x_1, size = x_2.shape[-2:], mode = 'bilinear')
+                x = torch.stack([x_1, x_2], dim=4)
+
+                to_append, _ = torch.max(x, dim=4)
+
+                out.append(to_append)
+        return out
+    
+
+class CORnet_S_MultiScale(nn.Module):
+    def __init__(self, num_classes=1000, ip_scale_bands=1, base_size=224):
+        super().__init__()
+        self.num_classes = num_classes
+        self.ip_scale_bands = ip_scale_bands
+        self.base_size = base_size
+
+        self.V1 = nn.Sequential(OrderedDict([
+            ('conv1', nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)),
+            ('norm1', nn.BatchNorm2d(64)),
+            ('nonlin1', nn.ReLU(inplace=True)),
+            ('pool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
+            ('conv2', nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)),
+            ('norm2', nn.BatchNorm2d(64)),
+            ('nonlin2', nn.ReLU(inplace=True)),
+        ]))
+        self.V2 = CORblock_S(64, 128, times=2)
+        self.V4 = CORblock_S(128, 256, times=4)
+        self.IT = CORblock_S(256, 512, times=2)
+
+        self.C1 = C(
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+            pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+            global_scale_pool=False
+        )
+        self.C2 = C(
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+            pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+            global_scale_pool=False
+        )
+        self.C4 = C(
+            pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+            pool_func2=nn.MaxPool2d(kernel_size=4, stride=3),
+            global_scale_pool=True  # Use global pooling at the final stage
+        )
+
+        self.decoder = nn.Sequential(OrderedDict([
+            ('avgpool', nn.AdaptiveAvgPool2d(1)),
+            ('flatten', Flatten()),
+            ('linear', nn.Linear(512, num_classes)),
+        ]))
+
+        self._weight_init(self.V1)
+        self._weight_init(self.V2)
+        self._weight_init(self.V4)
+        self._weight_init(self.IT)
+    
+
+    def _weight_init(self, model):
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+    def make_ip(self, x, num_scale_bands):
+        """
+        Build an image pyramid.
+        num_scale_bands = number of images in the pyramid - 1
+        """
+        base_image_size = int(x.shape[-1])
+        scale_factor = 4  # exponent factor for scaling
+        image_scales = get_ip_scales(num_scale_bands, base_image_size, scale_factor)
+        
+        if len(image_scales) > 1:
+            image_pyramid = []
+            for i_s in image_scales:
+                i_s = int(i_s)
+                interp_img = F.interpolate(x, size=(i_s, i_s), mode='bilinear', align_corners=False)
+                image_pyramid.append(interp_img)
+            return image_pyramid
+        else:
+            return [x]
+
+    def forward(self, x):
+        if self.ip_scale_bands > 1:
+            x_pyramid = self.make_ip(x, self.ip_scale_bands)
+        else:
+            x_pyramid = [x]
+
+        # Pass through V1
+        x_pyramid = [self.V1(x) for x in x_pyramid]
+        x_pyramid = self.C1(x_pyramid)
+
+        x_pyramid = [self.V2(x) for x in x_pyramid]
+        x_pyramid = self.C2(x_pyramid)
+
+        x_pyramid = [self.V4(x) for x in x_pyramid]
+
+        x_pyramid = [self.IT(x) for x in x_pyramid]
+        x_pyramid = self.C4(x_pyramid)
+
+        out = self.decoder(x_pyramid)
+        return out
 
 
 class Flatten(nn.Module):

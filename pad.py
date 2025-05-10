@@ -43,7 +43,7 @@ def pad_batch_random(images, target_size):
         padded_image = F.pad(
             images[i:i+1],
             (pad_left, pad_right, pad_top, pad_bottom),
-            mode='reflect',
+            mode='constant',
         )
         padded_images.append(padded_image)
     
@@ -67,9 +67,88 @@ def pad_batch(images, target_size):
 
     # Apply padding
     # Use reflection padding to avoid artifacts, or constant for default
-    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='reflect')
+    padded_images = F.pad(images, (pad_left, pad_right, pad_top, pad_bottom), mode='constant')
 
     return padded_images
+
+
+def pad_to_size_gray(a, size, gray_val_float=0.5, gray_val_uint8=128):
+    """
+    Pads tensor `a` (B, C, H, W) to `size` with uniform gray background using F.pad.
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    if torch.is_floating_point(a):
+        pad_val = gray_val_float
+    else:
+        pad_val = gray_val_uint8
+
+    # Note: F.pad pads in (left, right, top, bottom) order
+    a_padded = F.pad(a, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=pad_val)
+    return a_padded
+
+
+def pad_to_size_noise(a, size, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """
+    Pads tensor `a` (B, C, H, W) to the given `size` (H_out, W_out) with Gaussian noise.
+    Noise is generated per channel with the given mean and std (e.g., ImageNet stats).
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    dtype = a.dtype
+    device = a.device
+    B, C = a.shape[:2]
+
+    # Create noise background
+    canvas = torch.zeros((B, C, size[0], size[1]), dtype=dtype, device=device)
+    for c in range(C):
+        noise = torch.randn((B, 1, size[0], size[1]), dtype=dtype, device=device) * std[c] + mean[c]
+        canvas[:, c:c+1, :, :] = noise
+
+    # Paste input tensor in the center
+    canvas[:, :, pad_top:pad_top + current_size[0], pad_left:pad_left + current_size[1]] = a
+    return canvas
+
+
+def pad_to_size_blue(a, size):
+    """
+    Pads tensor `a` (B, C, H, W) to the given `size` (H_out, W_out) with blue color.
+    """
+    current_size = a.shape[-2:]  # (H, W)
+    pad_h = size[0] - current_size[0]
+    pad_w = size[1] - current_size[1]
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    # Create a blue canvas (R=0, G=0, B=1 if input is float; B=255 if uint8)
+    dtype = a.dtype
+    device = a.device
+    B, C = a.shape[:2]
+    blue_val = 1.0 if dtype == torch.float32 else 255
+    canvas = torch.zeros((B, C, size[0], size[1]), dtype=dtype, device=device)
+    if C == 3:
+        canvas[:, 2, :, :] = blue_val  # Blue channel
+
+    # Paste `a` in the center
+    canvas[:, :, pad_top:pad_top + current_size[0], pad_left:pad_left + current_size[1]] = a
+    return canvas
 
 
 class RandomResizePad:
@@ -136,7 +215,7 @@ class RandomResizePad:
     
 
 class CenterResizeCropPad:
-    def __init__(self, output_size=(227, 227), scale=160):
+    def __init__(self, output_size=(227, 227), scale=160, mode='constant'):
         """
         Transform that handles different scale invariances.
         
@@ -148,6 +227,7 @@ class CenterResizeCropPad:
         """
         self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
         self.scale = scale
+        self.mode = mode
         
     def __call__(self, img):
         """
@@ -186,13 +266,21 @@ class CenterResizeCropPad:
             pad_left = pad_w // 2
             pad_right = pad_w - pad_left
             
-            # Apply padding
-            transformed_img = F.pad(
-                resized_img,
-                (pad_left, pad_right, pad_top, pad_bottom),
-                mode='reflect',
-            )
-        
+            if self.mode in ['replicate', 'circular', 'constant', 'reflect']:
+                transformed_img = F.pad(
+                    resized_img,
+                    (pad_left, pad_right, pad_top, pad_bottom),
+                    mode=self.mode
+                )
+            elif self.mode == 'gray':
+                transformed_img = pad_to_size_gray(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            elif self.mode == 'blue':
+                transformed_img = pad_to_size_blue(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            elif self.mode == 'noise':
+                transformed_img = pad_to_size_noise(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            else:
+                raise ValueError(f"Unsupported padding mode: {self.mode}")
+            
         # Case 2: If scale > min(output_size), center crop to output_size
         else:
             # Calculate crop coordinates
@@ -208,6 +296,7 @@ class CenterResizeCropPad:
         
         return transformed_img
     
+import os
 
 class DataLoaderTransformWrapper:
     def __init__(self, dataloader: DataLoader, transform=None):
@@ -258,58 +347,60 @@ class DataLoaderTransformWrapper:
     def __getattr__(self, name):
         return getattr(self.dataloader, name)
 
-def visualize_transforms(img, scales, target_size=(322, 322), save_path="transform_visualization.png"):
-    """
-    Visualize how an image looks after applying CenterResizeCropPad transform at different scales.
-    
-    Args:
-        img: Input image tensor (B, C, H, W) - can be on CPU or GPU
-        scales (list): List of scale values to visualize
-        target_size (tuple): Output size for the transform
-        save_path (str): Path to save the visualization
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import torch
-    
-    # Make sure we're working with a single image (not a batch)
+def visualize_transforms(img, scales, target_size=(322, 322), save_path="transform_modes_grid.png"):
+    # Ensure single image
     if img.dim() == 4:
-        img_tensor = img[0]  # Take the first image if it's a batch
+        img_tensor = img[0]
     else:
         img_tensor = img
-    
-    # Create figure for visualization
+
+    # Padding modes to visualize
+    modes = ['noise', 'gray', 'blue', 'constant', 'replicate', 'reflect', 'circular']
+    n_modes = len(modes)
     n_scales = len(scales)
-    fig, axes = plt.subplots(1, n_scales + 1, figsize=(4 * (n_scales + 1), 4))
-    
-    # Display original image - move to CPU first
-    orig_img = img_tensor.cpu().permute(1, 2, 0).numpy()
-    orig_img = np.clip(orig_img, 0, 1)
-    axes[0].imshow(orig_img)
-    axes[0].set_title(f'Original ({orig_img.shape[1]}x{orig_img.shape[0]})')
-    axes[0].axis('off')
-    
-    # Apply transforms at different scales and visualize
-    for i, scale in enumerate(scales):
-        transform = CenterResizeCropPad(output_size=target_size, scale=scale)
-        transformed_tensor = transform(img_tensor)
-        
-        # Convert tensor back to numpy for visualization - move to CPU first
-        transformed_img = transformed_tensor.cpu().permute(1, 2, 0).numpy()
-        # Clip values to be between 0 and 1
-        transformed_img = np.clip(transformed_img, 0, 1)
-        
-        # Display transformed image
-        axes[i+1].imshow(transformed_img)
-        
-        # Add title indicating whether it's padded or cropped
-        if scale <= min(target_size):
-            mode = "padded"
-        else:
-            mode = "cropped"
-        axes[i+1].set_title(f'Scale {scale} ({mode})')
-        axes[i+1].axis('off')
-    
+
+    # Prepare subplot grid
+    fig, axes = plt.subplots(n_modes, n_scales, figsize=(4 * n_scales, 4 * n_modes))
+
+    for row_idx, mode in enumerate(modes):
+        for col_idx, scale in enumerate(scales):
+            transform = CenterResizeCropPad(output_size=target_size, scale=scale, mode=mode)
+            transformed_tensor = transform(img_tensor)
+
+            transformed_img = transformed_tensor.cpu().permute(1, 2, 0).numpy()
+            transformed_img = np.clip(transformed_img, 0, 1)
+
+            ax = axes[row_idx, col_idx] if n_modes > 1 else axes[col_idx]
+            ax.imshow(transformed_img)
+            ax.axis('off')
+
+            if row_idx == 0:
+                mode_type = "padded" if scale <= min(target_size) else "cropped"
+                ax.set_title(f"Scale {scale} ({mode_type})")
+
+            if col_idx == 0:
+                ax.set_ylabel(mode, fontsize=12)
+
     plt.tight_layout()
-    plt.savefig(save_path)
-    print(f"Visualization saved to {save_path}")
+    
+    base_name = os.path.splitext(save_path)[0]
+    path = os.path.join('visualize', base_name) # ./visualzie/transform_modes_grid/???
+    os.makedirs(path, exist_ok=True)
+    
+    plt.savefig(os.path.join(path, save_path))
+    print(f"Transform grid visualization saved to {os.path.join(path, save_path)}")
+    
+    
+    for scale in scales:
+        transform = CenterResizeCropPad(output_size=target_size, scale=scale, mode='constant')
+        transformed = transform(img_tensor)
+
+        # properly convert this time
+        arr = transformed.cpu().permute(1, 2, 0).numpy()
+        arr = np.clip(arr, 0, 1)
+        
+        plt.imsave(
+            os.path.join(path, f"constant_{scale}.png"),
+            arr,
+            vmin=0, vmax=1        # make sure it knows your data is in [0,1]
+        )

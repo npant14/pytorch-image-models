@@ -11,8 +11,11 @@ bypass=${7:-False}
 image_scales=${8:-"322"}  # Default is a single scale, but can now take a list like "160 192 227 270"
 time_limit=${9:-"3:00:00"}  # Default: 3 hours or "local"
 ckpt_dir=${10:-""}
-results_dir=${11:-"/oscar/data/tserre/xyu110/pytorch-output/validation"}
-cpus=${12:-8}  # Default: 1 CPU
+padding_mode=${11:-"constant"}
+partition=${12:-"gpu"}  # "gpu", "gpu-he", "gracehopper"
+results_dir=${13:-"/oscar/data/tserre/xyu110/pytorch-output/validation"}
+
+
 
 # Process the image_scales parameter
 # If it contains spaces, it's a list of scales to loop through
@@ -24,6 +27,18 @@ else
     # It's a single scale
     scales=($image_scales)
 fi
+
+cpu_per_gpu=1
+mem_per_gpu=8
+
+if [ "${partition}" = "gpu-he" ]; then
+    cpu_per_gpu=4
+    mem_per_gpu=48
+fi
+
+cpus=$((gpus * cpu_per_gpu))
+mem=$((gpus * mem_per_gpu))
+mem="${mem}GB"
 
 # Loop through each image scale
 for image_scale in "${scales[@]}"; do
@@ -46,6 +61,13 @@ for image_scale in "${scales[@]}"; do
     temp_script="val_scripts/${val_job_name}.sh"
     cp val_template.sh $temp_script
 
+    if [ "${partition}" = "gpu" ]; then
+    sed -i "/#SBATCH --partition/a #SBATCH --account=carney-tserre-condo" $temp_script
+    fi
+    if [ "${partition}" = "gracehopper" ]; then
+        sed -i "/#SBATCH --partition/a #SBATCH -account=ccv-gh200-gcondo" $temp_script
+    fi
+
     # Replace placeholders with actual values
     sed -i "s/VAL_JOB_NAME/${val_job_name}/g" $temp_script
     sed -i "s/MODEL_NAME/${model}/g" $temp_script
@@ -60,7 +82,10 @@ for image_scale in "${scales[@]}"; do
     sed -i "s|RESULTS_DIR_VALUE|${results_dir}|g" $temp_script
     sed -i "s/IMAGE_SCALE_VALUE/${image_scale}/g" $temp_script
     sed -i "s|CKPT_DIR_VALUE|${ckpt_dir}|g" $temp_script
-    sed -i "s/CPU_VALUE/${gpus}/g" $temp_script
+    sed -i "s/CPU_COUNT/${cpus}/g" $temp_script
+    sed -i "s|PARTITION_VALUE|${partition}|g" $temp_script
+    sed -i "s|PADDING_MODE_VALUE|${padding_mode}|g" $temp_script
+
 
     # Run based on the mode
     if [ $time_limit = "local" ]; then
