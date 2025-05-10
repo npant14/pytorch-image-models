@@ -896,16 +896,16 @@ def main():
             updates_per_epoch=updates_per_epoch,
         )
     start_epoch = 0
-    # if args.start_epoch is not None:
-    #     # a specified start_epoch will always override the resume epoch
-    #     start_epoch = args.start_epoch
-    # elif resume_epoch is not None:
-    #     start_epoch = resume_epoch
-    # if lr_scheduler is not None and start_epoch > 0:
-    #     if args.sched_on_updates:
-    #         lr_scheduler.step_update(start_epoch * updates_per_epoch)
-    #     else:
-    #         lr_scheduler.step(start_epoch)
+    if args.start_epoch is not None:
+        # a specified start_epoch will always override the resume epoch
+        start_epoch = args.start_epoch
+    elif resume_epoch is not None:
+        start_epoch = resume_epoch
+    if lr_scheduler is not None and start_epoch > 0:
+        # if args.sched_on_updates:
+        #     lr_scheduler.step_update(start_epoch * updates_per_epoch)
+        # else:
+        lr_scheduler.step(start_epoch)
 
     if utils.is_primary(args):
         if args.add_wrapped_schedulefree:
@@ -917,7 +917,6 @@ def main():
     
     results = []
     original_stdout = sys.stdout
-    
     try:
         for epoch in range(start_epoch, num_epochs):
             if hasattr(dataset_train, 'set_epoch'):
@@ -1073,7 +1072,6 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target) in enumerate(loader):
-        
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1093,18 +1091,21 @@ def train_one_epoch(
         def _forward():
             scale_loss = 0
             try:
-                if model.module.contrastive_loss:
-                    
+                is_cl = getattr(model.module if hasattr(model, 'module') else model, 'contrastive_loss', False)
+
+                if is_cl:
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
                 else:
                     output = model(input)
                     loss = loss_fn(output, target)
+            
             except Exception as e:
-                
-                if model.contrastive_loss:
+                # fallback, rare edge case
+                is_cl = getattr(model, 'contrastive_loss', False)
+                if is_cl:
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
                 else:
                     output = model(input)
                     loss = loss_fn(output, target)

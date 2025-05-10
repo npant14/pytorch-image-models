@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import torch
 import numpy as np
 from timm.models.registry import register_model
+from collections import OrderedDict
+from collections import OrderedDict
 
 HASH = '5c427c9c'
 
@@ -410,12 +412,8 @@ def cornet_z(pretrained=False, **kwargs):
     if pretrained:
        raise ValueError("No pretrained model available for CORnet_Z")
     model = CORnet_Z(**kwargs)
-    return modelfrom collections import OrderedDict
-from torch import nn
-import math
-from collections import OrderedDict
-from torch import nn
-from timm.models.registry import register_model
+    return model
+
 
 HASH = '5c427c9c'
 
