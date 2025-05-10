@@ -1007,6 +1007,7 @@ class CHRESMAX_V3_S(nn.Module):
                  classifier_input_size=13312,
                  contrastive_loss=True,
                  bypass=False,debug=False,
+                 main_route=False,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -1015,6 +1016,7 @@ class CHRESMAX_V3_S(nn.Module):
         self.ip_scale_bands = ip_scale_bands
         self.bypass = bypass
         self.debug = debug
+        self.main_route = main_route
         # Use the optimized backbone
         self.model_backbone = RESMAX_V2(
             num_classes=num_classes,
@@ -1032,7 +1034,7 @@ class CHRESMAX_V3_S(nn.Module):
             (output_of_stream1, correct_scale_loss)
         """
         # stream 1 (original scale)
-        result = self.model_backbone(x,main_route=True)
+        result = self.model_backbone(x,main_route=self.main_route)
         if self.bypass:
             stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
         else:
@@ -1054,7 +1056,7 @@ class CHRESMAX_V3_S(nn.Module):
             x_rescaled = x
         
         # forward pass on the scaled input
-        result = self.model_backbone(x_rescaled,main_route=True)
+        result = self.model_backbone(x_rescaled,main_route=self.main_route)
         if self.bypass:
             stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
         else:

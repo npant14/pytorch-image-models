@@ -17,9 +17,9 @@
 
 MODEL=chresmax_v3_s
 SCALE_BANDS=5
-ALPHA=1
+ALPHA=0
 BYPASS=True
-CL_LAMBDA=1
+CL_LAMBDA=0
 
 
 CLASSIFIER_INPUT_SIZE=13312
@@ -42,13 +42,12 @@ sh distributed_stu_dl.sh 1 train_skeleton_dl.py \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
     --decay-epochs 30 \
-    --warmup-epochs 2 \
+    --warmup-epochs 1 \
     --hflip 0.5\
     --train-crop-mode rrc\
     --scale 1.0 1.0 \
     --start-epoch 0\
     --workers 8\
-    --initial-checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/gracehopper_debug3_dl_chresmax_v3_s_5_322_13312_alpha_1_bypass_True_contrastive_loss/checkpoint-5.pth.tar \
     --input-size 3 322 322\
     --experiment gracehopper_debug1_dl_${MODEL}_${SCALE_BANDS}_322_${CLASSIFIER_INPUT_SIZE}_alpha_${ALPHA}_bypass_${BYPASS}_contrastive_loss\
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/train/4_25/\

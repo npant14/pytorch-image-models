@@ -535,7 +535,8 @@ def validate(
             elif len(batch) == 4:
                 input, target, _scale, _center = batch  # ignore extra info for validation
             else:
-                raise RuntimeError(f"Unexpected batch structure with {len(batch)} elements in validate loader")
+                raise RuntimeError(
+                    f"Unexpected batch structure with {len(batch)} elements in validate loader")
 
             input = input.to(device)
             target = target.to(device)
