@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import time
-from tqdm import tqdm
 from collections import OrderedDict
 from contextlib import suppress
 from functools import partial
@@ -239,7 +238,7 @@ def validate(args):
 
     if args.reparam:
         model = reparameterize_model(model)
-    
+
     param_count = sum([m.numel() for m in model.parameters()])
     _logger.info('Model %s created, param count: %d' % (args.model, param_count))
 
@@ -327,48 +326,32 @@ def validate(args):
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     print("image size:", args.image_scale)
 
-    visualize = True
+    # take one image from the loader
+    sample_image, _ = next(iter(loader))
 
-    if visualize:
-        desired_class = 207  # golden retriever
-        sample_images = []
-
-        # First pass: collect up to 10 images of the desired class
-        i = 0 # batch index
-        for images, targets in tqdm(loader, total=len(loader), desc="Looking for golden retrievers"):
-            i += 1
-            
-            if i < 75:
-                continue
-            
-            for img, label in zip(images, targets):
-                if label.item() == desired_class:
-                    # store with batch dim
-                    sample_images.append(img.unsqueeze(0))
-                    if len(sample_images) == 10:
-                        break
-            if len(sample_images) == 10:
-                break
-
-        if not sample_images:
-            print("No golden retrievers found in the dataset.")
-            return
-
-        scales = [160, 192, 227, 270, 322, 382, 454]
-
-        # Second pass: visualize transforms on each collected sample
-        for idx, sample in enumerate(tqdm(sample_images, desc="Visualizing transforms")):
-            save_path = f"golden_retriever_{idx+1}.png"
-            visualize_transforms(sample, scales, target_size, save_path=save_path)
-            print(f"Saved visualization for sample #{idx+1} → {save_path}")
-
-        exit(0)
-
-    
     #####PADDING FOR VALIDATION################
-    print("Padding mode:", args.model_kwargs['padding_mode'])
-    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=args.model_kwargs['padding_mode'])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1])
     loader = DataLoaderTransformWrapper(loader, transform)
+
+    visualize = False
+    if visualize == True:
+        scales = [160, 192, 227, 322, 382, 454]
+        visualize_transforms(sample_image, scales, target_size)
+        exit(0)
+    
+    # import numpy as np
+    # import matplotlib.pyplot as plt
+    
+    # images, _ = next(iter(loader))
+    # images = pad_batch(images, target_size)
+    
+    
+    # img = images[0]
+    # print(f"Image shape: {img.shape}")
+    # img_np = img.permute(1, 2, 0).cpu().numpy()
+    # img_np = np.clip(img_np, 0, 1)
+    # plt.imsave('sample_image.png', img_np)
+    # exit(0)
 
 
     batch_time = AverageMeter()
@@ -459,17 +442,12 @@ def validate(args):
         top1a, top5a = top1.avg, top5.avg
     results = OrderedDict(
         model=args.model,
-        ip_band=args.model_kwargs['ip_scale_bands'],
-        classifier_input_size=args.model_kwargs['classifier_input_size'],
-        bypass=args.model_kwargs['bypass'],
-        cl=args.model_kwargs['cl'],
-        scale_invariance=args.image_scale[1],
-        model_scale=data_config['input_size'][-1],
         top1=round(top1a, 4), top1_err=round(100 - top1a, 4),
         top5=round(top5a, 4), top5_err=round(100 - top5a, 4),
         param_count=round(param_count / 1e6, 2),
-        # crop_pct=crop_pct,
-        # interpolation=data_config['interpolation'],
+        img_size=data_config['input_size'][-1],
+        crop_pct=crop_pct,
+        interpolation=data_config['interpolation'],
     )
 
     _logger.info(' * Acc@1 {:.3f} ({:.3f}) Acc@5 {:.3f} ({:.3f})'.format(
@@ -568,79 +546,19 @@ def main():
 
 
 def write_results(results_file, results, format='csv'):
-    # Check if the file exists to determine mode ('a' for append, 'w' for new file)
-    file_exists = os.path.isfile(results_file)
-    
-    with open(results_file, mode='a' if file_exists else 'w') as cf:
+    with open(results_file, mode='w') as cf:
         if format == 'json':
-            # For JSON, we need to handle appending differently
-            if file_exists:
-                # If file exists but is empty, write as new
-                if os.path.getsize(results_file) == 0:
-                    json.dump(results, cf, indent=4)
-                else:
-                    # Need to read existing JSON, append new results, and write back
-                    cf.close()  # Close file first
-                    with open(results_file, 'r') as rf:
-                        try:
-                            existing_data = json.load(rf)
-                        except json.JSONDecodeError:
-                            # If not valid JSON, start fresh
-                            existing_data = []
-                    
-                    # Handle different data structures
-                    if isinstance(existing_data, list):
-                        if isinstance(results, list):
-                            existing_data.extend(results)
-                        else:
-                            existing_data.append(results)
-                    elif isinstance(existing_data, dict) and isinstance(results, dict):
-                        existing_data.update(results)
-                    else:
-                        # If incompatible types, create an array of both
-                        existing_data = [existing_data, results]
-                    
-                    # Write back the combined data
-                    with open(results_file, 'w') as wf:
-                        json.dump(existing_data, wf, indent=4)
-            else:
-                # New file
-                json.dump(results, cf, indent=4)
-        else:  # CSV
+            json.dump(results, cf, indent=4)
+        else:
             if not isinstance(results, (list, tuple)):
                 results = [results]
             if not results:
                 return
-                
-            if file_exists and os.path.getsize(results_file) > 0:
-                # File exists and has content, only write data without header
-                dw = csv.DictWriter(cf, fieldnames=results[0].keys())
-                for r in results:
-                    dw.writerow(r)
-            else:
-                # New file or empty file, write header and data
-                dw = csv.DictWriter(cf, fieldnames=results[0].keys())
-                dw.writeheader()
-                for r in results:
-                    dw.writerow(r)
-            
+            dw = csv.DictWriter(cf, fieldnames=results[0].keys())
+            dw.writeheader()
+            for r in results:
+                dw.writerow(r)
             cf.flush()
-
-
-# def write_results(results_file, results, format='csv'):
-#     with open(results_file, mode='w') as cf:
-#         if format == 'json':
-#             json.dump(results, cf, indent=4)
-#         else:
-#             if not isinstance(results, (list, tuple)):
-#                 results = [results]
-#             if not results:
-#                 return
-#             dw = csv.DictWriter(cf, fieldnames=results[0].keys())
-#             dw.writeheader()
-#             for r in results:
-#                 dw.writerow(r)
-#             cf.flush()
 
 
 

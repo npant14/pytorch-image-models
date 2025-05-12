@@ -388,38 +388,6 @@ def CORnet_Z():
 
     return model
 
-@register_model
-def cornet_s(pretrained=False, **kwargs):
-    try:
-        del kwargs["pretrained_cfg"]
-        del kwargs["pretrained_cfg_overlay"]
-        del kwargs["drop_rate"]
-    except:
-        pass
-    if pretrained:
-       raise ValueError("No pretrained model available for CORnet_S")
-    model = CORnet_S()
-    return model
-
-@register_model
-def cornet_z(pretrained=False, **kwargs):
-    try:
-        del kwargs["pretrained_cfg"]
-        del kwargs["pretrained_cfg_overlay"]
-        del kwargs["drop_rate"]
-    except:
-        pass
-    if pretrained:
-       raise ValueError("No pretrained model available for CORnet_Z")
-    model = CORnet_Z(**kwargs)
-    return model
-
-
-HASH = '5c427c9c'
-
-HASH = '1d3f7974'
-
-
 class Flatten(nn.Module):
 
     """
