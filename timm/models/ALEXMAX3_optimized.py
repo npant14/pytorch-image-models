@@ -93,9 +93,10 @@ class C_scoring2_optimized(nn.Module):
             # We'll iteratively soft-select from out_list[0] through out_list[-1]
             out_ref = out_list[0]
             final_size = out_list[len(out_list)//2].shape[-2:]  # pick a reference size
-
+            print(final_size)
+            print(out_list[0].unsqueeze(0).shape)
             for i in range(1, len(out_list)):
-                tmp = F.interpolate(out_list[i], final_size, mode='bilinear', align_corners=False)
+                tmp = F.interpolate(out_list[i].unsqueeze(0), final_size, mode='bilinear', align_corners=False)
                 tmp = self.resizing_layers(tmp)
                 
                 # Score each

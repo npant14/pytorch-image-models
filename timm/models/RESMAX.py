@@ -1240,9 +1240,9 @@ class CHRESMAX_V3(nn.Module):
                  num_classes=1000,
                  in_chans=3,
                  ip_scale_bands=1,
-                 classifier_input_size=13312,
+                 classifier_input_size=18432,
                  contrastive_loss=True,
-                 bypass=False,
+                 bypass=True,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -1323,7 +1323,7 @@ class RESMAX_V2_bypass_only(nn.Module):
     def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
                  ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False,
                  bypass=False, main_route=False,
-                 c_scoring='v2',
+                 c_scoring='v2',test=False,
                  **kwargs):
         self.num_classes = num_classes
         self.in_chans = in_chans
@@ -1335,6 +1335,7 @@ class RESMAX_V2_bypass_only(nn.Module):
         self.bypass = bypass
         self.c_scoring = c_scoring
         self.main_route = main_route
+        self.test = test
         super(RESMAX_V2_bypass_only, self).__init__()
 
         self.s1 = S1_Res()
@@ -1358,32 +1359,33 @@ class RESMAX_V2_bypass_only(nn.Module):
                 nn.ReLU(inplace=True)
             )
 
-        self.s3 = S3_Res()
-        if self.ip_scale_bands > 4:
-            self.global_pool = C_scoring2_optimized(
-                num_channels=256,
-                pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
-                pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
-                resize_kernel_1=3,
-                resize_kernel_2=1,
-                skip=2,
-                global_scale_pool=False
-            )
-        else:
-            self.global_pool = C(global_scale_pool=True)
+        # self.s3 = S3_Res()
+        # if self.ip_scale_bands > 4:
+        #     self.global_pool = C_scoring2_optimized(
+        #         num_channels=256,
+        #         pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
+        #         pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
+        #         resize_kernel_1=3,
+        #         resize_kernel_2=1,
+        #         skip=2,
+        #         global_scale_pool=False
+        #     )
+        # else:
+        #     self.global_pool = C(global_scale_pool=True)
 
         self.fc = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(classifier_input_size, 4096),
+            # nn.Dropout(0.5),
+            nn.Linear(classifier_input_size, 256),
             nn.ReLU()
         )
-        self.fc1 = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(4096, 4096),
-            nn.ReLU()
-        )
+        # self.fc1 = nn.Sequential(
+        #     nn.Dropout(0.5),
+        #     nn.Linear(4096, 4096),
+        #     nn.ReLU()
+        # )
         self.fc2 = nn.Sequential(
-            nn.Linear(4096, num_classes)
+            nn.Dropout(0.2),
+            nn.Linear(256, num_classes)
         )
 
         self.print_param_stats()
@@ -1407,22 +1409,20 @@ class RESMAX_V2_bypass_only(nn.Module):
         else:
             return [x]
 
-    def forward(self, x, pyramid=False):
-        if self.main_route:
-            out = self.make_ip(x, 2)
-        else:
-            out = self.make_ip(x, self.ip_scale_bands)
+    def forward(self, x, pyramid_size=1):
+        out = self.make_ip(x, pyramid_size)
         
         out = self.s1(out)
         out_c1 = self.c1(out)
         
-        if self.bypass:
-            bypass = self.s2b(out_c1)
-            bypass = self.c2b_seq(bypass[0])
-            bypass = bypass.reshape(bypass.size(0), -1)
+        bypass = self.s2b(out_c1)
+        bypass = self.c2b_seq(bypass[0])
+        bypass = bypass.reshape(bypass.size(0), -1)
         
         out = self.fc(bypass)
-        out = self.fc1(out)
+        # out = self.fc1(out)
+        # if not self.test:
+        #     out = self.dropout(out)
         out = self.fc2(out)
 
         if self.contrastive_loss:
@@ -1468,6 +1468,7 @@ class CHRESMAX_V3_bypass_only(nn.Module):
                  classifier_input_size=13312,
                  contrastive_loss=True,
                  bypass=False,
+                 test=False,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -1475,6 +1476,7 @@ class CHRESMAX_V3_bypass_only(nn.Module):
         self.in_chans = in_chans
         self.ip_scale_bands = ip_scale_bands
         self.bypass = bypass
+        self.test = test
         
         # Use the optimized backbone
         self.model_backbone = RESMAX_V2_bypass_only(
@@ -1484,6 +1486,7 @@ class CHRESMAX_V3_bypass_only(nn.Module):
             classifier_input_size=classifier_input_size,
             contrastive_loss=self.contrastive_loss,
             bypass=bypass,
+            test=test,
         )
 
     def forward(self, x):
@@ -1493,12 +1496,17 @@ class CHRESMAX_V3_bypass_only(nn.Module):
             (output_of_stream1, correct_scale_loss)
         """
         # stream 1 (original scale)
-        result = self.model_backbone(x)
+        if self.test:
+            result = self.model_backbone(x, 18)
+        else:
+            result = self.model_backbone(x, 1)
         if self.bypass:
             stream_1_output, stream_1_c1_feats, stream_1_bypass = result
         else:
             stream_1_output, stream_1_c1_feats = result
 
+        if self.test:
+            return stream_1_output, 0
         # stream 2 (random scale)
         scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
         scale_factor = random.choice(scale_factor_list)
@@ -1515,7 +1523,7 @@ class CHRESMAX_V3_bypass_only(nn.Module):
             x_rescaled = center_crop(x_rescaled)
 
         # forward pass on the scaled input
-        result = self.model_backbone(x_rescaled)
+        result = self.model_backbone(x_rescaled, len(scale_factor_list))
         if self.bypass:
             stream_2_output, stream_2_c1_feats, stream_2_bypass = result
         else:

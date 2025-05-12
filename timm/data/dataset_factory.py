@@ -207,7 +207,7 @@ def create_dataset(
             seed=seed,
             input_img_mode=input_img_mode,
             **kwargs
-        )
+        )        
     else:
         # FIXME support more advance split cfg for ImageFolder/Tar datasets in the future
         if search_split and os.path.isdir(root):
