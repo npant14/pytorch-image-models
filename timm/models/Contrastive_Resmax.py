@@ -466,6 +466,7 @@ class ContrastiveRESMAX_V4(nn.Module):
             out2, c1_feats2, c2_feats2, bypass2 = self.student(x_rescaled)
         else:
             out2, c1_feats2, c2_feats2 = self.student(x_rescaled)
+        
         c1_contrastive_loss = calc_contrastive_loss(c1_feats1, c1_feats2, self.temperature)
         c2_contrastive_loss = calc_contrastive_loss(c2_feats1, c2_feats2, self.temperature)
         out_contrastive_loss = nt_xent_loss(out1, out2, self.temperature)
@@ -474,6 +475,253 @@ class ContrastiveRESMAX_V4(nn.Module):
             contrastive_total = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss + 0.1 * bypass_contrastive_loss
         else:
             contrastive_total = c1_contrastive_loss + c2_contrastive_loss + 0.1 * out_contrastive_loss
+        if self.use_kl_loss:
+            student_log_probs = F.log_softmax(out1 / self.temperature, dim=1)
+            teacher_probs = F.softmax(teacher_out / self.temperature, dim=1)
+            kl_loss = F.kl_div(student_log_probs, teacher_probs, reduction='batchmean') * (self.temperature ** 2)
+            total_loss = contrastive_total + self.kl_loss_weight * kl_loss
+        else:
+            total_loss = contrastive_total
+        return out2, total_loss
+
+class ContrastiveRESMAX_V4_5(nn.Module):
+    def __init__(self,
+                 num_classes=1000,
+                 in_chans=3,
+                 teacher_ip_scale_bands=3,
+                 student_ip_scale_bands=7,
+                 classifier_input_size=9216,
+                 contrastive_loss=True,
+                 bypass=False,
+                 pretrained_path=None,
+                 temperature=0.1,
+                 use_kl_loss=True,
+                 kl_loss_weight=0.5,
+                 **kwargs):
+        super().__init__()
+        self.num_classes = num_classes
+        self.contrastive_loss = contrastive_loss
+        self.temperature = temperature
+        self.use_kl_loss = use_kl_loss
+        self.kl_loss_weight = kl_loss_weight
+
+        # Teacher model (frozen)
+        self.teacher = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=teacher_ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=contrastive_loss,
+            bypass=bypass,
+        )
+        pretrained_path='/oscar/data/tserre/xyu110/pytorch-output/train/0/models_w_aug/ip_3_resmax_v2_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_]_bypass_scale_0.08/model_best.pth.tar'
+        if pretrained_path is not None:
+            checkpoint = torch.load(pretrained_path, weights_only=False, map_location='cpu')
+            if 'state_dict' in checkpoint:
+                self.teacher.load_state_dict(checkpoint['state_dict'], strict=True)
+            else:
+                self.teacher.load_state_dict(checkpoint, strict=True)
+        for param in self.teacher.parameters():
+            param.requires_grad = False
+        self.teacher.eval()
+
+        # Student model (trainable, with more scale bands)
+        self.student = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=student_ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=contrastive_loss,
+            bypass=bypass,
+        )
+        self.student.load_state_dict(self.teacher.state_dict(), strict=False)
+        for param in self.student.parameters():
+            param.requires_grad = False
+        for param in self.student.c1.parameters():
+            param.requires_grad = True
+        for param in self.student.c2.parameters():
+            param.requires_grad = True
+        for param in self.student.c2b_seq.parameters():
+            param.requires_grad = True
+        for param in self.student.global_pool.parameters():
+            param.requires_grad = True
+
+    def forward(self, x, train=True):
+        batch_size = x.shape[0]
+        if train:
+            with torch.no_grad():
+                teacher_out, *_ = self.teacher(x)
+                teacher_log_probs = F.log_softmax(teacher_out / self.temperature, dim=1)
+        if self.student.bypass:
+            out1, c1_feats1, c2_feats1, bypass1 = self.student(x)
+        else:
+            out1, c1_feats1, c2_feats1 = self.student(x)
+        if not train:
+            return out1
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+        if new_hw <= img_hw:
+            x_rescaled = F.pad(x_rescaled, (0, img_hw - new_hw, 0, img_hw - new_hw))
+        else:
+            center_crop = transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        if self.student.bypass:
+            out2, c1_feats2, c2_feats2, bypass2 = self.student(x_rescaled)
+        else:
+            out2, c1_feats2, c2_feats2 = self.student(x_rescaled)
+
+        # Use MSE loss for c1 features
+        if isinstance(c1_feats1, list):
+            c1_contrastive_loss = sum(F.mse_loss(f1, f2) for f1, f2 in zip(c1_feats1, c1_feats2)) / len(c1_feats1)
+        else:
+            c1_contrastive_loss = F.mse_loss(c1_feats1, c1_feats2)
+
+        # Use MSE loss for c2 features
+        if isinstance(c2_feats1, list):
+            c2_contrastive_loss = sum(F.mse_loss(f1, f2) for f1, f2 in zip(c2_feats1, c2_feats2)) / len(c2_feats1)
+        else:
+            c2_contrastive_loss = F.mse_loss(c2_feats1, c2_feats2)
+
+        # Use MSE loss for output features
+        #out_contrastive_loss = F.mse_loss(out1, out2)
+
+        if self.student.bypass:
+            # Use MSE loss for bypass features
+            bypass_contrastive_loss = F.mse_loss(bypass1, bypass2)
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss + bypass_contrastive_loss
+        else:
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss 
+
+        if self.use_kl_loss:
+            student_log_probs = F.log_softmax(out1 / self.temperature, dim=1)
+            teacher_probs = F.softmax(teacher_out / self.temperature, dim=1)
+            kl_loss = F.kl_div(student_log_probs, teacher_probs, reduction='batchmean') * (self.temperature ** 2)
+            total_loss = contrastive_total + self.kl_loss_weight * kl_loss
+        else:
+            total_loss = contrastive_total
+        return out2, total_loss
+
+class ContrastiveRESMAX_V4_6(nn.Module):
+    def __init__(self,
+                 num_classes=1000,
+                 in_chans=3,
+                 teacher_ip_scale_bands=3,
+                 student_ip_scale_bands=7,
+                 classifier_input_size=9216,
+                 contrastive_loss=True,
+                 bypass=False,
+                 pretrained_path=None,
+                 temperature=0.1,
+                 use_kl_loss=True,
+                 kl_loss_weight=0.5,
+                 **kwargs):
+        super().__init__()
+        self.num_classes = num_classes
+        self.contrastive_loss = contrastive_loss
+        self.temperature = temperature
+        self.use_kl_loss = use_kl_loss
+        self.kl_loss_weight = kl_loss_weight
+
+        # Teacher model (frozen)
+        self.teacher = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=teacher_ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=contrastive_loss,
+            bypass=bypass,
+        )
+        pretrained_path='/oscar/data/tserre/xyu110/pytorch-output/train/0/models_w_aug/ip_3_resmax_v2_gpu_8_cl_0_ip_3_322_322_18432_c1[_6,3,1_]_bypass_scale_0.08/model_best.pth.tar'
+        if pretrained_path is not None:
+            checkpoint = torch.load(pretrained_path, weights_only=False, map_location='cpu')
+            if 'state_dict' in checkpoint:
+                self.teacher.load_state_dict(checkpoint['state_dict'], strict=True)
+            else:
+                self.teacher.load_state_dict(checkpoint, strict=True)
+        for param in self.teacher.parameters():
+            param.requires_grad = False
+        self.teacher.eval()
+
+        # Student model (trainable, with more scale bands)
+        self.student = RESMAX_V2(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=student_ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=contrastive_loss,
+            bypass=bypass,
+        )
+        self.student.load_state_dict(self.teacher.state_dict(), strict=False)
+        for param in self.student.parameters():
+            param.requires_grad = False
+        for param in self.student.c1.parameters():
+            param.requires_grad = True
+        for param in self.student.c2.parameters():
+            param.requires_grad = True
+        for param in self.student.c2b_seq.parameters():
+            param.requires_grad = True
+        for param in self.student.global_pool.parameters():
+            param.requires_grad = True
+        for param in self.student.fc1.parameters():
+            param.requires_grad = True
+        for param in self.student.fc2.parameters():
+            param.requires_grad = True
+      
+            
+            
+
+    def forward(self, x, train=True):
+        batch_size = x.shape[0]
+        if train:
+            with torch.no_grad():
+                teacher_out, *_ = self.teacher(x)
+                teacher_log_probs = F.log_softmax(teacher_out / self.temperature, dim=1)
+        if self.student.bypass:
+            out1, c1_feats1, c2_feats1, bypass1 = self.student(x)
+        else:
+            out1, c1_feats1, c2_feats1 = self.student(x)
+        if not train:
+            return out1
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        scale_factor = random.choice(scale_factor_list)
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+        if new_hw <= img_hw:
+            x_rescaled = F.pad(x_rescaled, (0, img_hw - new_hw, 0, img_hw - new_hw))
+        else:
+            center_crop = transforms.CenterCrop(img_hw)
+            x_rescaled = center_crop(x_rescaled)
+        if self.student.bypass:
+            out2, c1_feats2, c2_feats2, bypass2 = self.student(x_rescaled)
+        else:
+            out2, c1_feats2, c2_feats2 = self.student(x_rescaled)
+
+        # Use MSE loss for c1 features
+        if isinstance(c1_feats1, list):
+            c1_contrastive_loss = sum(F.mse_loss(f1, f2) for f1, f2 in zip(c1_feats1, c1_feats2)) / len(c1_feats1)
+        else:
+            c1_contrastive_loss = F.mse_loss(c1_feats1, c1_feats2)
+
+        # Use MSE loss for c2 features
+        if isinstance(c2_feats1, list):
+            c2_contrastive_loss = sum(F.mse_loss(f1, f2) for f1, f2 in zip(c2_feats1, c2_feats2)) / len(c2_feats1)
+        else:
+            c2_contrastive_loss = F.mse_loss(c2_feats1, c2_feats2)
+
+        # Use MSE loss for output features
+        #out_contrastive_loss = F.mse_loss(out1, out2)
+
+        if self.student.bypass:
+            # Use MSE loss for bypass features
+            bypass_contrastive_loss = F.mse_loss(bypass1, bypass2)
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss + bypass_contrastive_loss
+        else:
+            contrastive_total = c1_contrastive_loss + c2_contrastive_loss 
+
         if self.use_kl_loss:
             student_log_probs = F.log_softmax(out1 / self.temperature, dim=1)
             teacher_probs = F.softmax(teacher_out / self.temperature, dim=1)
@@ -523,4 +771,25 @@ def ft_resmax_v4(pretrained=False, **kwargs):
     for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
         kwargs.pop(key, None)
     model = ContrastiveRESMAX_V4(**kwargs)
+    return model
+
+@register_model
+def ft_resmax_v4_5(pretrained=False, **kwargs):
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+    model = ContrastiveRESMAX_V4_5(**kwargs)
+    return model
+
+@register_model
+def ft_resmax_v4_6(pretrained=False, **kwargs):
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+    model = ContrastiveRESMAX_V4_6(**kwargs)
+    return model
+
+@register_model
+def ft_resmax_v0_5(pretrained=False, **kwargs):
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+    model = ContrastiveRESMAX_V0_5(**kwargs)
     return model
