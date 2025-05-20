@@ -18,7 +18,7 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 CL_LAMBDA=0.1
 model=ft_resmax_v2_2_1
 ip_scale_bands=3
-ip_scale_bands_student=7
+ip_scale_bands_student=5
 
 sh distributed_stu_teacher.sh 8 train_skeleton_ts.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \

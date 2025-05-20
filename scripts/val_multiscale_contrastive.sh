@@ -21,7 +21,7 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 MODE='ft_resmax_v2_2'
 for imgscale in 160 192 227
 do
-    for ip_band in 7
+    for ip_band in 3
     do  
         # Set size based on ip_band
         if [ $ip_band -eq 1 ]; then
