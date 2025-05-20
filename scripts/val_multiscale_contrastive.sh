@@ -18,10 +18,10 @@ source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
 
 
 
-MODE='ft_resmax_v4'
+MODE='ft_resmax_v2_2'
 for imgscale in 160 192 227
 do
-    for ip_band in 3
+    for ip_band in 7
     do  
         # Set size based on ip_band
         if [ $ip_band -eq 1 ]; then
@@ -29,16 +29,16 @@ do
         else
             size=18432
         fi
-        sh distributed_val.sh 2 validate.py \
+        sh distributed_val_contrastive.sh 2 validate_contrastive.py \
             --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
             --model ${MODE} \
-            --model-kwargs ip_scale_bands=${ip_band} ip_scale_bands_student=3 classifier_input_size=${size} bypass=True\
+            --model-kwargs ip_scale_bands=3 ip_scale_bands_student=${ip_band} classifier_input_size=${size} bypass=True\
             -b 64 \
             --image-scale 3 $imgscale $imgscale \
             --input-size 3 322 322 \
             --pretrained \
-            --checkpoint /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/5_25/profile_teacher_ip_3_student_ip_3_resmax_v3_bypass_scale_1.0_cl_lambda_0.1/model_best.pth.tar \
-            --results-file output/validation/scale_${imgscale}_ft_resmax_v4_bypass_ip_${ip_band}.txt
+            --checkpoint '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/5_25/fprofile_teacher_ip_{ip_scale_bands}_scale_bands_student_{ip_scale_bands_student}_${model}_bypass_scale_1.0_cl_lambda_{CL_LAMBDA}/model_best.pth.tar'\
+            --results-file output/validation/scale_${imgscale}_${MODE}_bypass_ip_${ip_band}_cl_lambda_0.1.txt
         wait
 
     done

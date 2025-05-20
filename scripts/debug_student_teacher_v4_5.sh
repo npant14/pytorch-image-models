@@ -15,18 +15,18 @@ module load python/3.9.16s-x3wdtvt
 module load cuda
 
 source  /users/irodri15/data/irodri15/Hmax/hmax_pytorch/venv/bin/activate
-CL_LAMBDA=0.1
-model=ft_resmax_v2_2_1
+CL_LAMBDA=0.2
+model=ft_resmax_v4_6
 ip_scale_bands=3
-ip_scale_bands_student=7
+ip_scale_bands_student=5
 
-sh distributed_stu_teacher.sh 8 train_skeleton_ts.py \
+sh distributed_stu_teacher.sh 2 train_skeleton_ts.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $model \
     --model-kwargs ip_scale_bands=$ip_scale_bands ip_scale_bands_student=$ip_scale_bands_student classifier_input_size=18432 bypass=True \
     --opt sgd \
-    -b 32 \
+    -b 90 \
     --epochs 30 \
     --cl-lambda $CL_LAMBDA\
     --lr 1e-4 \
@@ -41,7 +41,7 @@ sh distributed_stu_teacher.sh 8 train_skeleton_ts.py \
     --workers 4 \
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment profile_teacher_ip_${ip_scale_bands}_scale_bands_student_${ip_scale_bands_student}_${model}_bypass_scale_1.0_cl_lambda_${CL_LAMBDA} \
+    --experiment profile_teacher_ip_${ip_scale_bands}_student_ip_${ip_scale_bands_student}_{$model}_bypass_scale_1.0_cl_lambda_${CL_LAMBDA} \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/5_25/\
     
  
