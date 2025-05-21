@@ -287,6 +287,10 @@ group.add_argument('--scale', type=float, nargs='+', default=[0.08, 1.0], metava
 #                    help='Random resize aspect ratio (default: 0.75 1.33)')
 group.add_argument('--hflip', type=float, default=0.5,
                    help='Horizontal flip training aug probability')
+group.add_argument('--use-bandpass', action='store_true', help='Apply frequency band filtering')
+group.add_argument('--bandpass-low', type=int, default=32)
+group.add_argument('--bandpass-high', type=int, default=64)
+
 # group.add_argument('--vflip', type=float, default=0.,
 #                    help='Vertical flip training aug probability')
 # group.add_argument('--color-jitter', type=float, default=0.4, metavar='PCT',
@@ -601,8 +605,6 @@ def main():
     #     assert device.type == 'cuda'
     #     model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
     #     loss_scaler = ApexScaler()
-    #     if utils.is_primary(args):
-    #         _logger.info('Using NVIDIA APEX AMP. Training in mixed precision.')
     # elif use_amp == 'native':
     #     try:
     #         amp_autocast = partial(torch.autocast, device_type=device.type, dtype=amp_dtype)
@@ -655,12 +657,7 @@ def main():
         else:
             if utils.is_primary(args):
                 _logger.info("Using native Torch DistributedDataParallel.")
-                _logger.info(f"ip scale bands {args.model_kwargs['ip_scale_bands']}")
-            if args.model_kwargs['ip_scale_bands'] == 1:
-                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb,find_unused_parameters=True)
-            else:
-                model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
-        # NOTE: EMA model does not need to be wrapped by DDP
+            model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
 
     # if args.torchcompile:
     #     # torch compile should be done after DDP
@@ -750,6 +747,9 @@ def main():
         scale=args.scale, # [1,1]
         ratio=[1,1],#args.ratio,
         hflip=args.hflip,
+        use_bandpass=args.use_bandpass,
+        bandpass_low=args.bandpass_low,
+        bandpass_high=args.bandpass_high,
         vflip=0, #args.vflip,
         color_jitter=None,#args.color_jitter,
         color_jitter_prob=None, #args.color_jitter_prob,
@@ -1072,6 +1072,7 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target) in enumerate(loader):
+        
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1091,21 +1092,16 @@ def train_one_epoch(
         def _forward():
             scale_loss = 0
             try:
-                is_cl = getattr(model.module if hasattr(model, 'module') else model, 'contrastive_loss', False)
-
-                if is_cl:
+                if model.module.contrastive_loss:
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
                 else:
                     output = model(input)
                     loss = loss_fn(output, target)
-            
             except Exception as e:
-                # fallback, rare edge case
-                is_cl = getattr(model, 'contrastive_loss', False)
-                if is_cl:
+                if hasattr(model.module, "contrastive_loss") and model.module.contrastive_loss:
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
+                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
                 else:
                     output = model(input)
                     loss = loss_fn(output, target)
