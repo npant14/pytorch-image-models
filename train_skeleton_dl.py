@@ -70,12 +70,12 @@ try:
 except ImportError as e:
     has_functorch = False
 
-CSV_FILE= "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/foreground_proportions_with_rescaled_centers.csv"
+CSV_FILE= "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
 ROOT_DIR = "/oscar/data/tserre/npant1/ILSVRC/train"
 MASK_LOOKUP_JSON = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
 
 if not os.path.exists(CSV_FILE):
-    CSV_FILE = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/foreground_proportions_with_rescaled_centers.csv'
+    CSV_FILE = "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
 if not os.path.exists(MASK_LOOKUP_JSON):
     MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 
@@ -366,7 +366,6 @@ def train_one_epoch(
     update_time_m = utils.AverageMeter()
     data_time_m = utils.AverageMeter()
     losses_m = utils.AverageMeter()
-    scale_selection_losses_m = utils.AverageMeter()
     scale_losses_m = utils.AverageMeter()
     model.train()
     
@@ -392,8 +391,8 @@ def train_one_epoch(
         scale_band = scale_band.to(device)
         #scale_band = scale_band  # So larger scale_band is smaller loss
        
-        scale_band = 5- scale_bands_range(scale_band, new_max=num_bands)
-       
+        scale_band = scale_bands_range(scale_band,new_min=0, new_max=num_bands)
+        scale_band = 5 - scale_band
         center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
@@ -402,38 +401,40 @@ def train_one_epoch(
         
         def _forward():
             scale_loss = 0
-            scale_selection_loss = 0
+            
             try:
                 if model.module.contrastive_loss:
-                    output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
+                    
+                    output, scale_loss= model(input,scale_band)
                     scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
+                    loss = loss_fn(output, target)  + (scale_loss)
                 else:
-                    output, scale_logits = model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (scale_selection_loss)
+                    output = model(input)
+                   
+                    loss = loss_fn(output, target) 
             except Exception as e:
                 if model.contrastive_loss:
-                    output, scale_logits, scale_loss= model(input)
-                    scale_selection_loss =alpha* F.cross_entropy(scale_logits, scale_band)
+                    
+                    output, scale_loss= model(input,scale_band)
+                    
                     scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target) + (scale_selection_loss) + (scale_loss)
+                    loss = loss_fn(output, target)  + (scale_loss)
                 else:
-                    output, scale_logits  = model(input)
-                    scale_selection_loss = alpha* F.cross_entropy(scale_logits, scale_band)
-                    loss = loss_fn(output, target) + (scale_selection_loss)
+                    
+                    output  = model(input)
+                   
+                    loss = loss_fn(output, target) 
                     
             #print one sample from scale_logits and its ground truth
             #apply softmax to scale_logits
-            scale_logits = F.softmax(scale_logits, dim=1)
+            #scale_logits = F.softmax(scale_logits, dim=1)
             #print the scale that was selected the most in the batch
-            selected_scale = torch.argmax(scale_logits, dim=1)
-            count_selected_scale = torch.bincount(selected_scale)
-            print(count_selected_scale)
-            count_gt_scale = torch.bincount(scale_band)
-            print(count_gt_scale)
-            return loss, scale_selection_loss, scale_loss
+            #selected_scale = torch.argmax(scale_logits, dim=1)
+            #count_selected_scale = torch.bincount(selected_scale)
+            #print(count_selected_scale)
+            #count_gt_scale = torch.bincount(scale_band)
+            #print(count_gt_scale)
+            return loss, scale_loss
 
         def _backward(_loss):
             if loss_scaler is not None:
@@ -457,7 +458,7 @@ def train_one_epoch(
                         )
                     optimizer.step()
 
-        loss, scale_selection_loss, scale_loss = _forward()
+        loss,  scale_loss = _forward()
         _backward(loss)
 
         running_loss += loss.item()
@@ -467,7 +468,6 @@ def train_one_epoch(
 
         if not args.distributed:
             losses_m.update(loss.item() * accum_steps, input.size(0))
-            scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
             scale_losses_m.update(scale_loss * accum_steps, input.size(0))
         update_sample_count += input.size(0)
 
@@ -497,7 +497,6 @@ def train_one_epoch(
             if args.distributed:
                 reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
                 losses_m.update(reduced_loss.item() * accum_steps, input.size(0))   
-                scale_selection_losses_m.update(scale_selection_loss.item() * accum_steps, input.size(0))
                 scale_losses_m.update(scale_loss.item() * accum_steps, input.size(0))   
                 update_sample_count *= args.world_size
             if utils.is_primary(args):
@@ -505,7 +504,6 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
-                    f'Scale Selection Loss: {scale_selection_losses_m.val:#.3g} ({scale_selection_losses_m.avg:#.3g})  '
                     f'Scale Loss: {scale_losses_m.val:#.3g} ({scale_losses_m.avg:#.3g})  '
                     #f'Time: {update_time_m.val:.3f}s ',
                     #f'({update_time_m.avg:.3f}s)  ',
@@ -520,7 +518,6 @@ def train_one_epoch(
         data_start_time = time.time()    
     return OrderedDict([
         ('total_loss', losses_m.avg),
-        ('scale_selection_loss', scale_selection_losses_m.avg),
         ('scale_loss', scale_losses_m.avg),
     ])
 
