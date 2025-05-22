@@ -326,7 +326,7 @@ def validate(args):
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     print("image size:", args.image_scale)
 
-    visualize = True
+    visualize = False
 
     if visualize:
         desired_class = 207  # golden retriever
