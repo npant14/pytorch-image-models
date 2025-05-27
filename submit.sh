@@ -62,13 +62,19 @@
 # ./submit_job.sh chresmax_v3_a 3 0.1 18432 8 32 True "192:00:00" 0.01 gpu 0.08 322
 # ./submit_job.sh chresmax_v3_a_2 3 0.1 18432 8 32 True "192:00:00" 0.01 gpu 1.0 322
 # ./submit_job.sh ft_resmax_v2 3 0.1 18432 8 32 True "144:00:00" 0.0001 gpu 1.0 322
+# ./submit_job.sh chresmax_v3_2_abs 3 0.1 18432 8 16 True "192:00:00" 0.01 gpu
+
+
+
+
 
 # MNIST
 # ./submit_job.sh chresmax_v3 3 0.1 512 2 128 True "local" 0.01 gpu-he 1.0 96
 # ./submit_job.sh chresmax_v3_bypass_only 11 0.1 9216 4 64 True "192:00:00" 0.01 gpu 1.0 224
 # ./submit_job.sh chresmax_v3_bypass_only 11 0.1 9216 4 64 True "192:00:00" 0.01 gpu 1.0 224
-# ./submit_job.sh chresmax_v3 11 0.1 8192 2 16 True "local" 0.01 gpu-he 1.0 224
-# ./submit_job.sh chresmax_v3_a_2 11 0.1 10496 2 16 True "48:00:00" 0.01 gpu-he 1.0 224
+# ./submit_job.sh chresmax_v3 11 0.1 10496 2 16 True "48:00:00" 0.01 gpu-he 1.0 224
+# ./submit_job.sh chresmax_v3 16 0.1 10496 2 8 True "48:00:00" 0.001 gpu-he 1.0 224
+# ./submit_job.sh chresmax_v3_a_2 11 0.1 10496 2 16 True "48:00:00" 0.001 gpu-he 1.0 224
 
 # val parameters: model_name, ip_bands, cl_lambda, cls_input_size, gpus, batch_size, bypass, time (or local), ckpt_dir, results_dir
 

@@ -50,6 +50,8 @@ fi
 
 # Check if directory exists and append suffix if needed
 OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/4"
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/mnist"
+
 mkdir -p OUTPUT_DIR
 SUFFIX_COUNT=1
 
@@ -88,8 +90,6 @@ echo "Using experiment name: ${EXPERIMENT_NAME}"
 
 # MNIST
 # /files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/mnist"
-mkdir -p OUTPUT_DIR
 
 sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /oscar/data/tserre/xyu110/mnist \
@@ -105,7 +105,6 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --sched step \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
-    --decay-epochs 5 \
     --warmup-epochs 0 \
     --hflip 0.5 \
     --scale $IMAGE_SCALE 1.0 \
