@@ -70,12 +70,12 @@ try:
 except ImportError as e:
     has_functorch = False
 
-CSV_FILE= "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
+CSV_FILE= "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/fp_checked2.csv"
 ROOT_DIR = "/oscar/data/tserre/npant1/ILSVRC/train"
-MASK_LOOKUP_JSON = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
+MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 
 if not os.path.exists(CSV_FILE):
-    CSV_FILE = "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
+    CSV_FILE = "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/fp_checked2.csv"
 if not os.path.exists(MASK_LOOKUP_JSON):
     MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 
@@ -207,8 +207,8 @@ group.add_argument('--momentum', type=float, default=0.9, metavar='M',
                    help='Optimizer momentum (default: 0.9)')
 group.add_argument('--weight-decay', type=float, default=2e-5,
                    help='weight decay (default: 2e-5)')
-group.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
-                   help='Clip gradient norm (default: None, no clipping)')
+group.add_argument('--clip-grad', type=float, default=1.0,
+                   help='Clip gradient norm (default: 1.0)')
 group.add_argument('--clip-mode', type=str, default='norm',
                    help='Gradient clipping mode. One of ("norm", "value", "agc")')
 group.add_argument('--layer-decay', type=float, default=None,
@@ -379,7 +379,7 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target, scale_band, center) in enumerate(loader):
-
+        
         # save one image from the batch for debugging
         if batch_idx == 0:
             save_image(input[0], f"input_{batch_idx}.png")
@@ -404,59 +404,47 @@ def train_one_epoch(
             
             try:
                 if model.module.contrastive_loss:
-                    
-                    output, scale_loss= model(input,scale_band)
-                    scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target)  + (scale_loss)
+                    output, scale_loss = model(input, scale_band)
+                    # Scale the losses to prevent numerical instability
+                    scale_loss = args.cl_lambda * scale_loss
+                    loss = loss_fn(output, target) + scale_loss
+                    # Add loss scaling
+                    loss = loss / (1.0 + args.cl_lambda)  # Normalize by total loss weight
                 else:
                     output = model(input)
-                   
-                    loss = loss_fn(output, target) 
+                    loss = loss_fn(output, target)
             except Exception as e:
                 if model.contrastive_loss:
-                    
-                    output, scale_loss= model(input,scale_band)
-                    
-                    scale_loss = args.cl_lambda*scale_loss
-                    loss = loss_fn(output, target)  + (scale_loss)
+                    output, scale_loss = model(input, scale_band)
+                    scale_loss = args.cl_lambda * scale_loss
+                    loss = loss_fn(output, target) + scale_loss
+                    # Add loss scaling
+                    loss = loss / (1.0 + args.cl_lambda)  # Normalize by total loss weight
                 else:
-                    
-                    output  = model(input)
-                   
-                    loss = loss_fn(output, target) 
-                    
-            #print one sample from scale_logits and its ground truth
-            #apply softmax to scale_logits
-            #scale_logits = F.softmax(scale_logits, dim=1)
-            #print the scale that was selected the most in the batch
-            #selected_scale = torch.argmax(scale_logits, dim=1)
-            #count_selected_scale = torch.bincount(selected_scale)
-            #print(count_selected_scale)
-            #count_gt_scale = torch.bincount(scale_band)
-            #print(count_gt_scale)
+                    output = model(input)
+                    loss = loss_fn(output, target)
+            
+            # let's print output statistics for debugging
+            # print('output statistics')
+            # print(f"Output shape: {output.shape}")
+            # print(f"Output min: {output.min()}")
+            # print(f"Output max: {output.max()}")
+            # print(f"Output mean: {output.mean()}")
+            # print(f"Output std: {output.std()}")
+            
+            
             return loss, scale_loss
 
         def _backward(_loss):
-            if loss_scaler is not None:
-                loss_scaler(
-                    _loss,
-                    optimizer,  
-                    clip_grad=args.clip_grad,
-                    clip_mode=args.clip_mode,
-                    parameters=model_parameters(model, exclude_head='agc' in args.clip_mode),
-                    create_graph=second_order,
-                    need_update=need_update,
-                )
-            else:
-                _loss.backward(create_graph=second_order)
-                if need_update:
-                    if args.clip_grad is not None:
-                        utils.dispatch_clip_grad(
-                            model_parameters(model, exclude_head='agc' in args.clip_mode),
-                            value=args.clip_grad,
-                            mode=args.clip_mode,
-                        )
-                    optimizer.step()
+            _loss.backward(create_graph=second_order)
+            if need_update:
+                if args.clip_grad is not None:
+                    utils.dispatch_clip_grad(
+                        model_parameters(model, exclude_head='agc' in args.clip_mode),
+                        value=args.clip_grad,
+                        mode=args.clip_mode,
+                    )
+                optimizer.step()
 
         loss,  scale_loss = _forward()
         _backward(loss)
@@ -471,15 +459,15 @@ def train_one_epoch(
             scale_losses_m.update(scale_loss * accum_steps, input.size(0))
         update_sample_count += input.size(0)
 
-        if not need_update:
-            data_start_time = time.time()
-            continue
+        # if not need_update:
+        #     data_start_time = time.time()
+        #     continue
 
         optimizer.zero_grad()
 
         num_updates += 1
-        if model_ema is not None:
-            model_ema.update(model, step=num_updates)
+        # if model_ema is not None:
+        #     model_ema.update(model, step=num_updates)
             
         if args.synchronize_step and device.type == 'cuda':
             torch.cuda.synchronize()
@@ -488,9 +476,7 @@ def train_one_epoch(
         # update_start_time = time_now
 
         if update_idx % args.log_interval == 0:
-            #if args.add_wrapped_schedulefree:
-            #    lr = optimizer.defaults['lr']  # Get learning rate from ScheduleFree
-            #else:
+            
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
 
@@ -547,7 +533,7 @@ def validate(
                 input = input.contiguous(memory_format=torch.channels_last)
             
             # (class_logits, scale_logits) = model(input)
-            output, scale_logits,scale_loss = model(input)
+            output, scale_loss = model(input)
             loss = loss_fn(output, target)
             scale_loss = args.cl_lambda*scale_loss
             loss = loss + scale_loss
