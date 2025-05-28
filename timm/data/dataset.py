@@ -72,7 +72,7 @@ with open(wordnet_to_label_txt, 'r') as f:
 
 
 class ScaledImagenetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, mask_lookup_json,root=None, transform=None, crop_size=224):
+    def __init__(self, csv_file, root_dir, mask_lookup_json,root=None, transform=None, crop_size=224, input_img_mode='RGB',load_bytes=False):
         """
         Args:
             csv_file (str): Path to CSV file containing metadata.
@@ -87,12 +87,14 @@ class ScaledImagenetDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.crop_size = crop_size
+        self.input_img_mode = input_img_mode
+        self.load_bytes = load_bytes
         with open(mask_lookup_json, 'r') as f:
             self.mask_lookup = json.load(f)
         # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
         self.resize_size = int(round(crop_size * (256 / 224)))
-        self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
-        self.class_map = load_wordnet_to_numeric_mapping(self.class_path)
+        #self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
+        self.class_map = wordnet_to_label
         
     def __len__(self):
         return len(self.data)
@@ -105,39 +107,31 @@ class ScaledImagenetDataset(Dataset):
         scale_band = int(self.data.iloc[idx, 9])  # Scale Band
         center_x = float(self.data.iloc[idx, 7])  # Cropped center X
         center_y = float(self.data.iloc[idx, 8])  # Cropped center Y
-        
-        if img_file not in self.mask_lookup:
-            raise FileNotFoundError(f"Image file {img_file} not found in mask lookup JSON.")
-        
-        img_path = self.mask_lookup[img_file]["image_path"]
-        mask_path = self.mask_lookup[img_file]["mask_path"]
-        
         wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
         class_label = wordnet_to_label.get(wordnet_id, "Unknown")
-        #ignore unknown
-        if class_label == "Unknown":
-            return self.__getitem__(idx + 1)
-        if class_label == 1000:
-            return self.__getitem__(idx + 1)
+        folder = "/gpfs/data/tserre/npant1/ILSVRC/train/"
+        class_folder = img_file.split("/")[-1].split("_")[0]
+        img_path = os.path.join(folder, class_folder, img_file)
         if not os.path.exists(img_path):
             img_path = img_path.replace("/gpfs/data/tserre/npant1/ILSVRC/","/oscar/data/tserre/npant1/ILSVRC/")
-        
-        image = Image.open(img_path).convert("RGB")
-        mask_data = np.load(mask_path)
-        mask = mask_data[mask_data.files[0]]
-
-        if self.transform:
+        #print(img_path)
+        image = Image.open(img_path)
+        #mask_data = np.load(mask_path)
+        #mask = mask_data[mask_data.files[0]]
+        if self.input_img_mode and not self.load_bytes:
+            image = image.convert(self.input_img_mode)
+        if self.transform is not None:
             image = self.transform(image)
-            mask = Image.fromarray(mask).convert("L")
-            mask = transforms.Resize((322, 322))(mask)
-            mask = torch.tensor(np.array(mask), dtype=torch.float32)
-            mask = torch.stack([mask] * 3, dim=0)
+            # mask = Image.fromarray(mask).convert("L")
+            # mask = transforms.Resize((322, 322))(mask)
+            # mask = torch.tensor(np.array(mask), dtype=torch.float32)
+            # mask = torch.stack([mask] * 3, dim=0)
         
         center = torch.tensor([center_x, center_y], dtype=torch.float32)
         
         sample = {
             'image': image,
-            'mask': mask,
+            # 'mask': mask,
             'scale_band': scale_band,
             'center': center,
             'target': class_label

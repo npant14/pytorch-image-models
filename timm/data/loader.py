@@ -349,20 +349,39 @@ def create_loader_scale(
 
     # Instantiate your custom dataset.
     dataset = ScaledImagenetDataset(csv_file, root_dir,mask_look_up_json,root=root, transform=None, crop_size=crop_size)
-
-    # Compute the resize size to preserve the ratio (e.g. 224->256)
-    resize_size = int(round(crop_size * (256 / 224)))
-
-    # Create a fixed (deterministic) transform:
-    # Here we use a Resize (to resize_size) followed by a CenterCrop (to crop_size).
-    # You may adjust this pipeline if you wish to incorporate further (deterministic) augmentations.
-    transform = transforms.Compose([
-        transforms.Resize((resize_size, resize_size), interpolation=InterpolationMode.BILINEAR),
-        transforms.CenterCrop((crop_size, crop_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=mean, std=std),
-    ])
-    dataset.transform = transform
+    re_num_splits = 0
+    if re_split:
+        # apply RE to second half of batch if no aug split otherwise line up with aug split
+        re_num_splits = num_aug_splits or 2
+    
+    dataset.transform = create_transform(
+        input_size,
+        is_training=is_training,
+        no_aug=no_aug,
+        train_crop_mode=train_crop_mode,
+        scale=scale,
+        ratio=ratio,
+        hflip=hflip,
+        vflip=vflip,
+        color_jitter=color_jitter,
+        color_jitter_prob=color_jitter_prob,
+        grayscale_prob=grayscale_prob,
+        gaussian_blur_prob=gaussian_blur_prob,
+        auto_augment=auto_augment,
+        interpolation=interpolation,
+        mean=mean,
+        std=std,
+        crop_pct=crop_pct,
+        crop_mode=crop_mode,
+        crop_border_pixels=crop_border_pixels,
+        re_prob=re_prob,
+        re_mode=re_mode,
+        re_count=re_count,
+        re_num_splits=re_num_splits,
+        tf_preprocessing=tf_preprocessing,
+        use_prefetcher=use_prefetcher,
+        separate=num_aug_splits > 0,
+    )
 
     # (If your dataset is Iterable, pass along the num_workers info.)
     if isinstance(dataset, IterableImageDataset):
