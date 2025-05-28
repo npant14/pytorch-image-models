@@ -13,17 +13,17 @@
 MODEL=chresmax_v3_2_dl
 echo "Starting experiment"
 IP=5 
-CL_LAMBDA=1
-sh distributed_stu_dl.sh 4 train_skeleton_dl.py \
+CL_LAMBDA=0.001
+sh distributed_stu_dl.sh 8 train_skeleton_dl.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $MODEL \
     --model-kwargs ip_scale_bands=$IP classifier_input_size=18432 bypass=True contrastive_loss=True   \
     --scale-bands $IP \
     --opt sgd \
-    -b 32 \
+    -b 20 \
     --epochs 90 \
-    --lr 1e-2 \
+    --lr 0.09 \
     --weight-decay 5e-4 \
     --sched step \
     --momentum 0.9 \
@@ -33,9 +33,10 @@ sh distributed_stu_dl.sh 4 train_skeleton_dl.py \
     --warmup-epochs 0 \
     --scale 1.0 1.0 \
     --hflip 0.5\
+    --workers 4\
     --train-crop-mode rrc\
     --input-size 3 322 322\
-    --experiment 25_debug_dl_${MODEL}_${IP}_cl_1_ip_${IP}_322_18432_cl_lambda_${CL_LAMBDA} \
+    --experiment 29_debug_dl_${MODEL}_${IP}_cl_1_ip_${IP}_322_18432_cl_lambda_${CL_LAMBDA} \
     --output /users/irodri15/data/irodri15/Hmax/pytorch-image-models/output/5_25/\
     
  
