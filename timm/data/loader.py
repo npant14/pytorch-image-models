@@ -27,6 +27,39 @@ from torchvision.transforms import InterpolationMode
 
 _logger = logging.getLogger(__name__)
 
+def ideal_bandpass_filter(size, low_cutoff, high_cutoff):
+    
+    
+    
+    x = np.linspace(-size // 2, size // 2, size, endpoint=True)
+    y = np.linspace(-size // 2, size // 2, size, endpoint=True)
+    x, y = np.meshgrid(x, y)
+    dist = np.sqrt(x ** 2 + y ** 2)
+    low_pass = (dist >= low_cutoff).astype(np.float32)
+    high_pass = (dist <= high_cutoff).astype(np.float32)
+    bandpass = low_pass * high_pass
+    return bandpass.astype(np.complex64)
+
+class BandpassFilterTransform:
+    def __init__(self, low_cutoff, high_cutoff):
+        self.low_cutoff = low_cutoff
+        self.high_cutoff = high_cutoff
+
+    def __call__(self, tensor_img):
+        if isinstance(tensor_img, np.ndarray):
+            tensor_img = torch.from_numpy(tensor_img)
+        c, h, w = tensor_img.shape
+        tensor_out = torch.zeros_like(tensor_img)
+        bandpass = ideal_bandpass_filter(h, self.low_cutoff, self.high_cutoff)
+
+        for i in range(c):
+            channel = tensor_img[i].numpy()
+            fft = np.fft.fftshift(np.fft.fft2(channel))
+            filtered_fft = fft * bandpass
+            filtered = np.fft.ifft2(np.fft.ifftshift(filtered_fft))
+            filtered = np.real(filtered).astype(np.float32)
+            tensor_out[i] = torch.from_numpy(filtered)
+        return tensor_out
 
 def fast_collate(batch):
     """ A fast collation function optimized for uint8 images (np array or torch) and int64 targets (labels)"""
@@ -307,6 +340,9 @@ def create_loader_scale(
         ratio: Optional[Tuple[float, float]] = None,
         hflip: float = 0.5,
         vflip: float = 0.,
+        use_bandpass: bool = True,
+        bandpass_low:int=32,
+        bandpass_high:int=64,
         color_jitter: float = 0.4,
         color_jitter_prob: Optional[float] = None,
         grayscale_prob: float = 0.,
@@ -343,7 +379,7 @@ def create_loader_scale(
     and then center cropped to (crop_size, crop_size).
 
     All the remaining parameters are the same as in `create_loader` from timm.
-    Note: Because the logic for computing a “center” relies on a fixed resize + center crop,
+    Note: Because the logic for computing a "center" relies on a fixed resize + center crop,
           any random augmentation (e.g. RandomResizedCrop) is disabled here.
     """
 
@@ -463,6 +499,9 @@ def create_loader(
         ratio: Optional[Tuple[float, float]] = None,
         hflip: float = 0.5,
         vflip: float = 0.,
+        use_bandpass: bool = True,
+        bandpass_low:int=32,
+        bandpass_high:int=64,
         color_jitter: float = 0.4,
         color_jitter_prob: Optional[float] = None,
         grayscale_prob: float = 0.,
@@ -470,7 +509,7 @@ def create_loader(
         auto_augment: Optional[str] = None,
         num_aug_repeats: int = 0,
         num_aug_splits: int = 0,
-        interpolation: str = 'bilinear',
+        interpolation: str = 'nearest',
         mean: Tuple[float, ...] = IMAGENET_DEFAULT_MEAN,
         std: Tuple[float, ...] = IMAGENET_DEFAULT_STD,
         num_workers: int = 1,
@@ -539,34 +578,48 @@ def create_loader(
     if re_split:
         # apply RE to second half of batch if no aug split otherwise line up with aug split
         re_num_splits = num_aug_splits or 2
-    dataset.transform = create_transform(
-        input_size,
-        is_training=is_training,
-        no_aug=no_aug,
-        train_crop_mode=train_crop_mode,
-        scale=scale,
-        ratio=ratio,
-        hflip=hflip,
-        vflip=vflip,
-        color_jitter=color_jitter,
-        color_jitter_prob=color_jitter_prob,
-        grayscale_prob=grayscale_prob,
-        gaussian_blur_prob=gaussian_blur_prob,
-        auto_augment=auto_augment,
-        interpolation=interpolation,
-        mean=mean,
-        std=std,
-        crop_pct=crop_pct,
-        crop_mode=crop_mode,
-        crop_border_pixels=crop_border_pixels,
-        re_prob=re_prob,
-        re_mode=re_mode,
-        re_count=re_count,
-        re_num_splits=re_num_splits,
-        tf_preprocessing=tf_preprocessing,
-        use_prefetcher=use_prefetcher,
-        separate=num_aug_splits > 0,
-    )
+   
+    dataset_transform = create_transform(
+    input_size,
+    is_training=is_training,
+    no_aug=no_aug,
+    train_crop_mode=train_crop_mode,
+    scale=scale,
+    ratio=ratio,
+    hflip=hflip,
+    vflip=vflip,
+    color_jitter=color_jitter,
+    color_jitter_prob=color_jitter_prob,
+    grayscale_prob=grayscale_prob,
+    gaussian_blur_prob=gaussian_blur_prob,
+    auto_augment=auto_augment,
+    interpolation=interpolation,
+    mean=mean,
+    std=std,
+    crop_pct=crop_pct,
+    crop_mode=crop_mode,
+    crop_border_pixels=crop_border_pixels,
+    re_prob=re_prob,
+    re_mode=re_mode,
+    re_count=re_count,
+    re_num_splits=re_num_splits,
+    tf_preprocessing=tf_preprocessing,
+    use_prefetcher=use_prefetcher,
+    separate=num_aug_splits > 0,
+)
+
+    if use_bandpass:
+        dataset.transform = transforms.Compose([
+            dataset_transform,
+            BandpassFilterTransform(bandpass_low, bandpass_high)
+        ])
+    else:
+        dataset.transform = dataset_transform
+
+
+
+
+# add to transform
 
     if isinstance(dataset, IterableImageDataset):
         # give Iterable datasets early knowledge of num_workers so that sample estimates
