@@ -739,7 +739,7 @@ class RESMAX_V2_2(nn.Module):
             )
 
         self.s3 = S3_Res()
-        if self.ip_scale_bands > 4:
+        if self.ip_scale_bands > 6: # It was 4 before, this would only affect inference, during training was always below 4.
             self.global_pool = C_scoring2_optimized(
                 num_channels=256,
                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
@@ -766,7 +766,7 @@ class RESMAX_V2_2(nn.Module):
             nn.Linear(4096, num_classes)
         )
 
-        self.print_param_stats()
+        #self.print_param_stats()
 
     def make_ip(self, x, num_scale_bands):
         """
@@ -2225,7 +2225,7 @@ class CHRESMAX_V3_2(nn.Module):
         else:
             bypass_correct_scale_loss = 0
 
-        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + bypass_correct_scale_loss
 
         return stream_1_output, correct_scale_loss
     

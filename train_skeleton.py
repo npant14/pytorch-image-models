@@ -258,8 +258,8 @@ group.add_argument('--epochs', type=int, default=300, metavar='N',
                    help='number of epochs to train (default: 300)')
 group.add_argument('--epoch-repeats', type=float, default=0., metavar='N',
                    help='epoch repeat multiplier (number of times to repeat dataset epoch per train epoch).')
-group.add_argument('--start-epoch', default=None, type=int, metavar='N',
-                   help='manual epoch number (useful on restarts)')
+# group.add_argument('--start-epoch', default=None, type=int, metavar='N',
+#                    help='manual epoch number (useful on restarts)')
 # group.add_argument('--decay-milestones', default=[90, 180, 270], type=int, nargs='+', metavar="MILESTONES",
 #                    help='list of decay epoch indices for multistep lr. must be increasing')
 group.add_argument('--decay-epochs', type=float, default=90, metavar='N',
@@ -605,6 +605,8 @@ def main():
     #     assert device.type == 'cuda'
     #     model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
     #     loss_scaler = ApexScaler()
+    #     if utils.is_primary(args):
+    #         _logger.info('Using NVIDIA APEX AMP. Training in mixed precision.')
     # elif use_amp == 'native':
     #     try:
     #         amp_autocast = partial(torch.autocast, device_type=device.type, dtype=amp_dtype)
@@ -658,6 +660,8 @@ def main():
             if utils.is_primary(args):
                 _logger.info("Using native Torch DistributedDataParallel.")
             model = NativeDDP(model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb)
+                            #   ,find_unused_parameters=True)
+        # NOTE: EMA model does not need to be wrapped by DDP
 
     # if args.torchcompile:
     #     # torch compile should be done after DDP
@@ -896,16 +900,16 @@ def main():
             updates_per_epoch=updates_per_epoch,
         )
     start_epoch = 0
-    if args.start_epoch is not None:
-        # a specified start_epoch will always override the resume epoch
-        start_epoch = args.start_epoch
-    elif resume_epoch is not None:
-        start_epoch = resume_epoch
-    if lr_scheduler is not None and start_epoch > 0:
-        # if args.sched_on_updates:
-        #     lr_scheduler.step_update(start_epoch * updates_per_epoch)
-        # else:
-        lr_scheduler.step(start_epoch)
+    # if args.start_epoch is not None:
+    #     # a specified start_epoch will always override the resume epoch
+    #     start_epoch = args.start_epoch
+    # elif resume_epoch is not None:
+    #     start_epoch = resume_epoch
+    # if lr_scheduler is not None and start_epoch > 0:
+    #     if args.sched_on_updates:
+    #         lr_scheduler.step_update(start_epoch * updates_per_epoch)
+    #     else:
+    #         lr_scheduler.step(start_epoch)
 
     if utils.is_primary(args):
         if args.add_wrapped_schedulefree:
@@ -1024,7 +1028,6 @@ def main():
         _logger.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
     print(f'--result\n{json.dumps(results, indent=4)}')
 
-import pdb
 
 def train_one_epoch(
         epoch,
@@ -1072,7 +1075,7 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target) in enumerate(loader):
-        
+        import pdb; pdb.set_trace()
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1090,16 +1093,20 @@ def train_one_epoch(
         # data_time_m.update(accum_steps * (time.time() - data_start_time))
 
         def _forward():
-            scale_loss = 0
+            # with amp_autocast():
             try:
                 if model.module.contrastive_loss:
+                    
                     output, scale_loss = model(input)
-                    loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
-                else:
+                    loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
+            # default normal model behavior
+                else: 
                     output = model(input)
                     loss = loss_fn(output, target)
             except Exception as e:
+                
                 if hasattr(model.module, "contrastive_loss") and model.module.contrastive_loss:
+
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda*scale_loss)
                 else:
@@ -1108,7 +1115,7 @@ def train_one_epoch(
 
             # if accum_steps > 1:
             #     loss /= accum_steps
-            return loss, scale_loss
+            return loss
 
         def _backward(_loss):
             # if loss_scaler is not None:
@@ -1138,7 +1145,7 @@ def train_one_epoch(
         #         _backward(loss)
         # else:
 
-        loss, scale_loss = _forward()
+        loss = _forward()
         _backward(loss)
 
         running_loss += loss.item()
@@ -1182,7 +1189,6 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
-                    # f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
                     # f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
                     # f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
                     f'LR: {lr:.3e}  '

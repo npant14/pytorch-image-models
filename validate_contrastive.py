@@ -218,7 +218,6 @@ def validate(args):
         in_chans = args.input_size[0]
 
     args.model_kwargs['channel_size'] = args.input_size[-1]
-
     model = create_model(
         args.model,
         pretrained=args.pretrained,
@@ -234,7 +233,7 @@ def validate(args):
 
     if args.checkpoint:
         
-        load_checkpoint(model, args.checkpoint, args.use_ema)
+        load_checkpoint(model, args.checkpoint, args.use_ema,strict=False)
 
     if args.reparam:
         model = reparameterize_model(model)
@@ -308,7 +307,6 @@ def validate(args):
     loader = create_loader(
         dataset,
         input_size=data_config['input_size'],
-        # input_size=args.image_scale, ##############make image smaller
         batch_size=args.batch_size,
         use_prefetcher=args.prefetcher,
         interpolation=data_config['interpolation'],
@@ -324,7 +322,6 @@ def validate(args):
     )
     
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
-    print("image size:", args.image_scale)
 
     # take one image from the loader
     sample_image, _ = next(iter(loader))
@@ -338,21 +335,6 @@ def validate(args):
         scales = [160, 192, 227, 322, 382, 454]
         visualize_transforms(sample_image, scales, target_size)
         exit(0)
-    
-    # import numpy as np
-    # import matplotlib.pyplot as plt
-    
-    # images, _ = next(iter(loader))
-    # images = pad_batch(images, target_size)
-    
-    
-    # img = images[0]
-    # print(f"Image shape: {img.shape}")
-    # img_np = img.permute(1, 2, 0).cpu().numpy()
-    # img_np = np.clip(img_np, 0, 1)
-    # plt.imsave('sample_image.png', img_np)
-    # exit(0)
-
 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -361,22 +343,6 @@ def validate(args):
 
     model.eval()
 
-    # do brain score evaluation
-    # if args.model_kwargs['brainscore'] == True:
-    #     print("Running brainscore evaluation")
-    #     be = Brainscore_Experiment(model, "test_brainscore", device)
-    #     for compare in [0,1,2,3,4,5]:
-    #         be.rdm_corr_func(scale_test_list=[compare,2], save_rdms_list=
-    #                          ["module.layer1.1.conv2",
-    #                                         "module.layer2.0.conv2",
-    #                                         "module.layer2.1.conv2",
-    #                                         "module.layer3.0.conv2",
-    #                                         "module.layer3.1.conv2",
-    #                                         "module.layer4.0.conv2",
-    #                                         "module.layer4.1.conv2",
-    #                                         "module.fc"])
-
-    # do normal evaluation
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).to(device)
@@ -387,7 +353,6 @@ def validate(args):
 
         end = time.time()
         for batch_idx, (input, target) in enumerate(loader):
-
             if args.no_prefetcher:
                 target = target.to(device)
                 input = input.to(device)

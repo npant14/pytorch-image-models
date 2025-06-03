@@ -969,33 +969,37 @@ class ContrastiveRESMAX_V2_3(nn.Module):
                  classifier_input_size=9216,
                  contrastive_loss=True,
                  bypass=True,
-                 pretrained_path ='/cifs/data/tserre_lrs/projects/prj_hmax/models_new/models_wo_aug/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar',
+                 pretrained_path ='pre_weights/model_best.pth.tar',
                  temperature=0.1,
                  use_kl_loss=True,
                  kl_loss_weight=0.5,
                  **kwargs):
         super().__init__()
+        print("Initializing ContrastiveRESMAX_V2_3")
         self.num_classes = num_classes
         self.contrastive_loss = contrastive_loss
         self.temperature = temperature
         self.use_kl_loss = use_kl_loss
         self.kl_loss_weight = kl_loss_weight
         self.bypass = bypass
-        self.master_model = CHRESMAX_V3_2(classifier_input_size=classifier_input_size,ip_scale_bands=ip_scale_bands,bypass=bypass)
+        print("Creating master model")
+        self.master_model = CHRESMAX_V3_2(classifier_input_size=classifier_input_size,ip_scale_bands=ip_scale_bands,bypass=bypass,contrastive_loss=contrastive_loss)
         if pretrained_path is not None:
             checkpoint = torch.load(pretrained_path, weights_only=False, map_location='cpu')
             if 'state_dict' in checkpoint:
                 self.master_model.load_state_dict(checkpoint['state_dict'], strict=False)
             else:
                 self.master_model.load_state_dict(checkpoint, strict=True)
-        
+        print("Master model created successfully")  
         # make a copy of the master model
         self.teacher = self.master_model.model_backbone
 
         for param in self.teacher.parameters():
             param.requires_grad = False
         self.teacher.eval()
-        self.student = RESMAX_V2_2(classifier_input_size=classifier_input_size,ip_scale_bands=ip_scale_bands_student,bypass=bypass)
+        print("Creating student model")
+        self.student = RESMAX_V2_2(classifier_input_size=classifier_input_size,ip_scale_bands=ip_scale_bands_student,bypass=bypass,contrastive_loss=contrastive_loss)
+        print("Student model created successfully")
         #make a deep copy of the master model   
         self.student.load_state_dict(self.master_model.model_backbone.state_dict(), strict=False)
         #self.student.load_state_dict(self.teacher.state_dict(), strict=False)

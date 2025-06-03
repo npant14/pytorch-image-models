@@ -82,6 +82,7 @@ from .alexnet import *
 from .ALEXMAX import * 
 from .RESMAX import *
 from .RESMAX_Inception import *
+from .RESMAX_dl import *
 from .ALEXMAX3 import *
 from .ALEXMAX3_optimized import *
 from .ALEXMAX3_dl import *

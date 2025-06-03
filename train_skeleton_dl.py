@@ -533,7 +533,7 @@ def validate(
                 input = input.contiguous(memory_format=torch.channels_last)
             
             # (class_logits, scale_logits) = model(input)
-            output, scale_loss = model(input)
+            output, scale_loss = model(input,testing=True)
             loss = loss_fn(output, target)
             scale_loss = args.cl_lambda*scale_loss
             loss = loss + scale_loss

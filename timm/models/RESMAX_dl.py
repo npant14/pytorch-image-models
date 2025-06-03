@@ -167,10 +167,10 @@ class RESMAX_V2_2_DL(nn.Module):
         
         if self.bypass:
             # import pdb; pdb.set_trace()
-            bypass = self.s2b(out_c1)
-            bypass = self.c2b_score(bypass)
-            bypass = self.c2b_seq(bypass)
-            bypass = bypass.reshape(bypass.size(0), -1)
+            bypass_value = self.s2b(out_c1)
+            bypass_score = self.c2b_score(bypass_value)
+            bypass_value = self.c2b_seq(bypass_score)
+            bypass_value = bypass_value.reshape(bypass_value.size(0), -1)
         
         out = self.s3(out_c2)
         out = self.global_pool(out)
@@ -179,7 +179,7 @@ class RESMAX_V2_2_DL(nn.Module):
         out = out.reshape(out.size(0), -1)
 
         if self.bypass:
-            out = torch.cat([out, bypass], dim=1)
+            out = torch.cat([out, bypass_value], dim=1)
         
         out = self.fc(out)
         out = self.fc1(out)
@@ -187,7 +187,7 @@ class RESMAX_V2_2_DL(nn.Module):
 
         if self.contrastive_loss:
             if self.bypass:
-                return out, out_c1, out_c2, bypass
+                return out, out_c1, out_c2, bypass_value
             else:
                 return out, out_c1, out_c2
 
@@ -229,7 +229,7 @@ class CHRESMAX_V3_2_DL(nn.Module):
             bypass=bypass,
         )
 
-    def forward(self, x, scale_band=None):
+    def forward(self, x, scale_band=None,testing=False):
         """
         Creates two streams (original + random-scaled) for scale-consistency training.
         Returns:
@@ -242,7 +242,9 @@ class CHRESMAX_V3_2_DL(nn.Module):
             stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
         else:
             stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
-
+        if testing:
+            return stream_1_output, 0 
+ 
         # stream 2 (random scale)
         scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
         scale_factor = random.choice(scale_factor_list)
@@ -284,7 +286,7 @@ class CHRESMAX_V3_2_DL(nn.Module):
         else:
             bypass_correct_scale_loss = 0
 
-        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+        correct_scale_loss = (c1_correct_scale_loss + c2_correct_scale_loss + bypass_correct_scale_loss)/3 + 0.1 * out_correct_scale_loss  
 
         return stream_1_output, correct_scale_loss
 
@@ -298,7 +300,7 @@ def resmax_v2_sl(pretrained=False, **kwargs):
         del kwargs["drop_rate"]
     except:
         pass
-    model = RESMAX_V2_SL(**kwargs)
+    model = RESMAX_V2_2_DL(**kwargs)
     if pretrained:
         pass
     return model
