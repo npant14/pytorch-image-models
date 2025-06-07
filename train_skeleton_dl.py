@@ -638,6 +638,8 @@ def main():
         target_key=args.target_key,
         num_samples=args.train_num_samples,
     )
+    collate_fn = None
+    mixup_fn = None
     # create_loader_scale is presumably a custom loader that reads scale info from CSV
     loader_train = create_loader_scale(
         csv_file = CSV_FILE,
@@ -648,19 +650,33 @@ def main():
         batch_size=args.batch_size,
         is_training=True,
         no_aug=args.no_aug,
+        re_prob=0, #args.reprob,
+        re_mode='pixel', # shouldn't matter args.remode,
+        re_count=0, #args.recount,
+        re_split=False, #args.resplit,
         train_crop_mode=args.train_crop_mode,
+        scale=args.scale, # [1,1]
+        ratio=[1,1],#args.ratio,
         hflip=args.hflip,
+        color_jitter=None,#args.color_jitter,
+        color_jitter_prob=None, #args.color_jitter_prob,
+        grayscale_prob=None, #args.grayscale_prob,
+        gaussian_blur_prob=None, #args.gaussian_blur_prob,
+        auto_augment=None, #args.aa,
+        num_aug_repeats=0, #args.aug_repeats,
+        num_aug_splits=0,
         interpolation=data_config['interpolation'],
-        scale=args.scale,
         mean=data_config['mean'],
         std=data_config['std'],
         num_workers=args.workers,
         distributed=args.distributed,
-        pin_memory=False,
+        collate_fn=collate_fn,
+        pin_memory=False, #args.pin_mem,
         device=device,
         use_prefetcher=args.prefetcher,
         use_multi_epochs_loader=args.use_multi_epochs_loader,
         worker_seeding=args.worker_seeding,
+        crop_pct=data_config['crop_pct'],  # Added to match eval loader
     )
 
     loader_eval = None
@@ -695,6 +711,7 @@ def main():
             pin_memory=False,
             device=device,
             use_prefetcher=args.prefetcher,
+            use_multi_epochs_loader=args.use_multi_epochs_loader,  # Added to match train loader
         )
 
     # Setup loss functions
