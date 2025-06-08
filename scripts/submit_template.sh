@@ -50,6 +50,8 @@ fi
 
 # Check if directory exists and append suffix if needed
 OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/4"
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/mnist"
+
 mkdir -p OUTPUT_DIR
 SUFFIX_COUNT=1
 
@@ -83,14 +85,14 @@ echo "Using experiment name: ${EXPERIMENT_NAME}"
 #     --input-size $INPUT_SIZE \
 #     --experiment $EXPERIMENT_NAME \
 #     --output $OUTPUT_DIR
+#     --workers $WORKERS \
 
 
 # MNIST
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/mnist"
-mkdir -p OUTPUT_DIR
+# /files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/
 
 sh distributed_train.sh $GPUS train_skeleton.py \
-    --data-dir /files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/ \
+    --data-dir /oscar/data/tserre/xyu110/mnist \
     --num-classes 10 \
     --model $MODEL \
     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
@@ -103,14 +105,14 @@ sh distributed_train.sh $GPUS train_skeleton.py \
     --sched step \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
-    --decay-epochs 30 \
     --warmup-epochs 0 \
     --hflip 0.5 \
     --scale $IMAGE_SCALE 1.0 \
     --train-crop-mode rrc \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
-    --output $OUTPUT_DIR
+    --output $OUTPUT_DIR \
+    --workers $WORKERS 
 
 # resnet 18
 # sh distributed_train.sh $GPUS train_skeleton.py \

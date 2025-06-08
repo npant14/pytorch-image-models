@@ -4,18 +4,10 @@ Hacked together by / Copyright 2019, Ross Wightman
 """
 import io
 import logging
-import os
-import pandas as pd
-import numpy as np
-import sys
-import json
-
 from typing import Optional
 
 import torch
 import torch.utils.data as data
-from torch.utils.data import Dataset
-import torchvision.transforms as transforms
 from PIL import Image
 
 from .readers import create_reader
@@ -24,125 +16,6 @@ _logger = logging.getLogger(__name__)
 
 
 _ERROR_RETRY = 50
-
-
-
-def load_wordnet_to_numeric_mapping(txt_file_path: str) -> dict:
-    """
-    Reads a text file where each line contains a WordNet ID, a numeric value,
-    and a class name, separated by whitespace. Returns a dictionary mapping
-    each WordNet ID to the numeric value from the second column.
-
-    Example input file line:
-        n02119789 1 kit_fox
-
-    Args:
-        txt_file_path (str): Path to the text file.
-
-    Returns:
-        dict: A dictionary mapping from WordNet ID (str) to numeric value (int).
-    """
-    mapping = {}
-    with open(txt_file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue  # Skip empty lines.
-            parts = line.split()
-            if len(parts) < 2:
-                continue  # Skip lines that don't have at least two tokens.
-            wordnet_id = parts[0]
-            try:
-                numeric_value = int(parts[1])
-            except ValueError:
-                # Skip this line or handle the error as needed.
-                continue
-            mapping[wordnet_id] = numeric_value
-    return mapping
-
-# Get the directory of the current script
-current_dir = os.path.dirname(__file__)
-wordnet_to_label_txt = os.path.join(current_dir, '_info', 'wordnetids_to_labels.txt')
-wordnet_to_label = {}
-with open(wordnet_to_label_txt, 'r') as f:
-    for line in f:
-        parts = line.strip().split()
-        if len(parts) > 1:
-            wordnet_to_label[parts[0]] = int(parts[1])-1
-
-
-class ScaledImagenetDataset(Dataset):
-    def __init__(self, csv_file, root_dir, mask_lookup_json,root=None, transform=None, crop_size=224, input_img_mode='RGB',load_bytes=False):
-        """
-        Args:
-            csv_file (str): Path to CSV file containing metadata.
-            root_dir (str): Root directory containing all images.
-            transform (callable, optional): Transformations applied to samples.
-            crop_size (int): The final crop size used in the transformation (default 224).
-                             The image is first resized to a proportional size.
-                             (Default ratio: 256/224)
-        """
-        
-        self.data = pd.read_csv(csv_file)
-        self.root_dir = root_dir
-        self.transform = transform
-        self.crop_size = crop_size
-        self.input_img_mode = input_img_mode
-        self.load_bytes = load_bytes
-        with open(mask_lookup_json, 'r') as f:
-            self.mask_lookup = json.load(f)
-        # Compute the resize size so that the ratio crop_size:resize_size is the same as 224:256.
-        self.resize_size = int(round(crop_size * (256 / 224)))
-        #self.class_path = os.path.join(root, 'imagenet_synset_raw.txt')
-        self.class_map = wordnet_to_label
-        
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        img_file = self.data.iloc[idx, 0]  # Image File
-        scale_band = int(self.data.iloc[idx, 9])  # Scale Band
-        center_x = float(self.data.iloc[idx, 7])  # Cropped center X
-        center_y = float(self.data.iloc[idx, 8])  # Cropped center Y
-        wordnet_id = img_file.split('_')[0]  # Extract WordNet ID
-        class_label = wordnet_to_label.get(wordnet_id, "Unknown")
-        folder = "/gpfs/data/tserre/npant1/ILSVRC/train/"
-        class_folder = img_file.split("/")[-1].split("_")[0]
-        img_path = os.path.join(folder, class_folder, img_file)
-        if not os.path.exists(img_path):
-            img_path = img_path.replace("/gpfs/data/tserre/npant1/ILSVRC/","/oscar/data/tserre/npant1/ILSVRC/")
-        #print(img_path)
-        image = Image.open(img_path)
-        #mask_data = np.load(mask_path)
-        #mask = mask_data[mask_data.files[0]]
-        if self.input_img_mode and not self.load_bytes:
-            image = image.convert(self.input_img_mode)
-        if self.transform is not None:
-            image = self.transform(image)
-            # mask = Image.fromarray(mask).convert("L")
-            # mask = transforms.Resize((322, 322))(mask)
-            # mask = torch.tensor(np.array(mask), dtype=torch.float32)
-            # mask = torch.stack([mask] * 3, dim=0)
-        
-        center = torch.tensor([center_x, center_y], dtype=torch.float32)
-        
-        sample = {
-            'image': image,
-            # 'mask': mask,
-            'scale_band': scale_band,
-            'center': center,
-            'target': class_label
-        }
-        
-        input = sample['image']#(sample['image'], sample['mask'], sample['scale_band'], sample['resized_center'])
-        # make input a tensor
-        
-        target = sample['target']
-        
-        return input, target ,sample['scale_band'],sample['center']
 
 
 class ImageDataset(data.Dataset):
