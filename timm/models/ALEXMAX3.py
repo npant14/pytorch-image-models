@@ -852,7 +852,7 @@ class CHALEXMAX_V3_3(nn.Module):
 
         
 
-    def forward(self, x):
+    def forward(self, x,scale_band=None):
 
         # stream 1
         stream_1_output, stream_1_c1_feats ,stream_1_c2_feats = self.model_backbone(x)
@@ -904,7 +904,7 @@ class CHALEXMAX_V3(nn.Module):
 
         
 
-    def forward(self, x):
+    def forward(self, x,scale_band=None):
 
         # stream 1
         stream_1_output, stream_1_c1_feats ,stream_1_c2_feats = self.model_backbone(x,main_route=True)

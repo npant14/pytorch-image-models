@@ -747,9 +747,9 @@ def main():
         scale=args.scale, # [1,1]
         ratio=[1,1],#args.ratio,
         hflip=args.hflip,
-        use_bandpass=args.use_bandpass,
-        bandpass_low=args.bandpass_low,
-        bandpass_high=args.bandpass_high,
+        #use_bandpass=args.use_bandpass,
+        #bandpass_low=args.bandpass_low,
+        #bandpass_high=args.bandpass_high,
         vflip=0, #args.vflip,
         color_jitter=None,#args.color_jitter,
         color_jitter_prob=None, #args.color_jitter_prob,

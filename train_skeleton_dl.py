@@ -409,7 +409,7 @@ def train_one_epoch(
         #scale_band = scale_band  # So larger scale_band is smaller loss
        
         scale_band = scale_bands_range(scale_band,new_min=0, new_max=num_bands)
-        scale_band = 5 - scale_band
+        
         #center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
@@ -500,9 +500,9 @@ def train_one_epoch(
             
         if args.synchronize_step and device.type == 'cuda':
             torch.cuda.synchronize()
-        # time_now = time.time()
-        # update_time_m.update(time.time() - update_start_time)
-        # update_start_time = time_now
+        time_now = time.time()
+        update_time_m.update(time.time() - update_start_time)
+        update_start_time = time_now
 
         if update_idx % args.log_interval == 0:
             #if args.add_wrapped_schedulefree:
@@ -522,7 +522,7 @@ def train_one_epoch(
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
                     f'Scale Loss: {scale_losses_m.val:#.3g} ({scale_losses_m.avg:#.3g})  '
-                    #f'Time: {update_time_m.val:.3f}s ',
+                    f'Time: {update_time_m.val:.3f}s  '
                     #f'({update_time_m.avg:.3f}s)  ',
                     f'LR: {lr:.3e}  '
                     f'Data: {data_time_m.val:.3f} ({data_time_m.avg:.3f})'
@@ -564,7 +564,14 @@ def validate(
                 input = input.contiguous(memory_format=torch.channels_last)
             
             # (class_logits, scale_logits) = model(input)
-            output, scale_logits,scale_loss = model(input)
+            result = model(input)
+            if len(result) == 3:
+                output, scale_logits,scale_loss = result
+            elif len(result) == 2:
+                output, scale_loss = result
+            else:
+                output = result
+                scale_loss = 0
             loss = loss_fn(output, target)
             scale_loss = args.cl_lambda*scale_loss
             loss = loss + scale_loss
@@ -594,7 +601,7 @@ def validate(
 
 
 def main():
-    print(f"Starting main")
+    #print(f"Starting main")
     utils.setup_default_logging()
     args, args_text = _parse_args()
 
