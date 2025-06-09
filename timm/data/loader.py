@@ -52,6 +52,12 @@ def fast_collate(batch):
         tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
         for i in range(batch_size):
             tensor[i] += torch.from_numpy(batch[i][0])
+        # Handle extra items (like paths)
+        if len(batch[0]) > 2:
+            extra_items = []
+            for i in range(2, len(batch[0])):
+                extra_items.append([b[i] for b in batch])
+            return tensor, targets, *extra_items
         return tensor, targets
     elif isinstance(batch[0][0], torch.Tensor):
         targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
@@ -59,6 +65,12 @@ def fast_collate(batch):
         tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
         for i in range(batch_size):
             tensor[i].copy_(batch[i][0])
+        # Handle extra items (like paths)
+        if len(batch[0]) > 2:
+            extra_items = []
+            for i in range(2, len(batch[0])):
+                extra_items.append([b[i] for b in batch])
+            return tensor, targets, *extra_items
         return tensor, targets
     else:
         assert False
@@ -177,6 +189,58 @@ class PrefetchLoaderScale:
 
 
 
+       
+
+       
+   
+
+            if len(next_item) == 2:
+                next_input, next_target = next_item
+                next_extra = None
+            else:
+                next_input, next_target, *next_extra = next_item
+
+            with torch.cuda.stream(stream):
+                next_input = next_input.to(device=self.device, non_blocking=True)
+                next_input = next_input.to(dtype=self.img_dtype)
+                if self.is_cuda:
+                    next_input = next_input.sub_(self.mean).div_(self.std)
+                if self.random_erasing is not None:
+                    next_input = self.random_erasing(next_input)
+
+                next_target = next_target.to(device=self.device, non_blocking=True)
+
+            if not first:
+                if extra is None:
+                    yield input, target
+                else:
+                    yield input, target, *extra
+            else:
+                first = False
+
+            stream.synchronize()
+            input = next_input
+            target = next_target
+            extra = next_extra
+
+        if extra is None:
+            yield input, target
+        else:
+            yield input, target, *extra
+
+    def __len__(self):
+        return len(self.loader)
+
+    @property
+    def sampler(self):
+        return self.loader.sampler
+
+    @property
+    def dataset(self):
+        return self.loader.dataset
+    
+
+        
 class PrefetchLoader:
 
     def __init__(
@@ -228,7 +292,14 @@ class PrefetchLoader:
             stream = None
             stream_context = suppress
 
-        for next_input, next_target in self.loader:
+        for next_item in self.loader:
+            
+            if len(next_item) == 2:
+                next_input, next_target = next_item
+                next_path = None
+            else:
+                next_input, next_target, *next_extra = next_item
+                next_path = next_extra
 
             with stream_context():
                 next_input = next_input.to(device=self.device, non_blocking=True)
@@ -238,7 +309,10 @@ class PrefetchLoader:
                     next_input = self.random_erasing(next_input)
 
             if not first:
-                yield input, target
+                if path is None:
+                    yield input, target
+                else:
+                    yield input, target, path
             else:
                 first = False
 
@@ -247,8 +321,12 @@ class PrefetchLoader:
 
             input = next_input
             target = next_target
+            path = next_path
 
-        yield input, target
+        if path is None:
+            yield input, target
+        else:
+            yield input, target, path
 
     def __len__(self):
         return len(self.loader)
@@ -343,7 +421,7 @@ def create_loader_scale(
     and then center cropped to (crop_size, crop_size).
 
     All the remaining parameters are the same as in `create_loader` from timm.
-    Note: Because the logic for computing a “center” relies on a fixed resize + center crop,
+    Note: Because the logic for computing a "center" relies on a fixed resize + center crop,
           any random augmentation (e.g. RandomResizedCrop) is disabled here.
     """
 
@@ -428,6 +506,42 @@ def create_loader_scale(
         )
 
     return loader
+
+def custom_collate(batch):
+    """A custom collate function that handles paths and extra items"""
+    if isinstance(batch[0], tuple):
+        batch_size = len(batch)
+        if len(batch[0]) == 2:
+            # Handle case with just input and target
+            targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
+            tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
+            for i in range(batch_size):
+                if isinstance(batch[i][0], np.ndarray):
+                    tensor[i] = torch.from_numpy(batch[i][0])
+                else:
+                    tensor[i].copy_(batch[i][0])
+            return tensor, targets
+        else:
+            # Handle case with extra items (like paths)
+            targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
+            tensor = torch.zeros((batch_size, *batch[0][0].shape), dtype=torch.uint8)
+            for i in range(batch_size):
+                if isinstance(batch[i][0], np.ndarray):
+                    tensor[i] = torch.from_numpy(batch[i][0])
+                else:
+                    tensor[i].copy_(batch[i][0])
+            # Collect all extra items
+            extra_items = []
+            for i in range(2, len(batch[0])):
+                if isinstance(batch[0][i], (int, float)):
+                    # Convert numeric values to tensor
+                    extra_items.append(torch.tensor([b[i] for b in batch], dtype=torch.float32))
+                else:
+                    # Keep other items (like paths) as lists
+                    extra_items.append([b[i] for b in batch])
+            return tensor, targets, *extra_items
+    else:
+        return torch.utils.data.dataloader.default_collate(batch)
 
 def create_loader(
         dataset: Union[ImageDataset, IterableImageDataset],
@@ -569,7 +683,7 @@ def create_loader(
         assert num_aug_repeats == 0, "RepeatAugment not currently supported in non-distributed or IterableDataset use"
 
     if collate_fn is None:
-        collate_fn = fast_collate if use_prefetcher else torch.utils.data.dataloader.default_collate
+        collate_fn = custom_collate if use_prefetcher else torch.utils.data.dataloader.default_collate
 
     loader_class = torch.utils.data.DataLoader
     if use_multi_epochs_loader:
@@ -591,6 +705,7 @@ def create_loader(
     except TypeError as e:
         loader_args.pop('persistent_workers')  # only in Pytorch 1.7+
         loader = loader_class(dataset, **loader_args)
+   
     if use_prefetcher:
         prefetch_re_prob = re_prob if is_training and not no_aug else 0.
         loader = PrefetchLoader(

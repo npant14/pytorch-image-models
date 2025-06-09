@@ -16,6 +16,7 @@ import torch
 import torch.utils.data as data
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+from torchvision.datasets import ImageNet
 from PIL import Image
 
 from .readers import create_reader
@@ -260,12 +261,22 @@ class IterableImageDataset(data.IterableDataset):
         self._consecutive_errors = 0
 
     def __iter__(self):
-        for img, target in self.reader:
+        for item in self.reader:
+            if len(item) == 2:
+                img, target = item
+                extra = None
+            else:
+                img, target, *extra = item
+
             if self.transform is not None:
                 img = self.transform(img)
             if self.target_transform is not None:
                 target = self.target_transform(target)
-            yield img, target
+
+            if extra is None:
+                yield img, target
+            else:
+                yield img, target, *extra
 
     def __len__(self):
         if hasattr(self.reader, '__len__'):
@@ -331,3 +342,11 @@ class AugMixDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+class ImagenetWithPaths(ImageNet):
+    def __getitem__(self, index):
+        img, target = super().__getitem__(index)
+        path = self.samples[index][0]  # Get the path from the samples list
+       
+        return img, target, path
+    

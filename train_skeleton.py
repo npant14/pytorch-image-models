@@ -757,7 +757,7 @@ def main():
         gaussian_blur_prob=None, #args.gaussian_blur_prob,
         auto_augment=None, #args.aa,
         num_aug_repeats=0, #args.aug_repeats,
-        num_aug_splits=num_aug_splits,
+        num_aug_splits=0,
         interpolation=train_interpolation,
         mean=data_config['mean'],
         std=data_config['std'],

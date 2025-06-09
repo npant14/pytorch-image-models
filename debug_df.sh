@@ -13,15 +13,15 @@
 MODEL=chresmax_v3_2_dl
 echo "Starting experiment"
 IP=5 
-CL_LAMBDA=1
-sh distributed_stu_dl.sh 4 train_skeleton_dl.py \
+CL_LAMBDA=0.5
+sh distributed_stu_dl.sh 8 train_skeleton_dl.py \
     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
     --dataset torch/imagenet \
     --model $MODEL \
     --model-kwargs ip_scale_bands=$IP classifier_input_size=18432 bypass=True contrastive_loss=True   \
     --scale-bands $IP \
     --opt sgd \
-    -b 32 \
+    -b 22 \
     --epochs 90 \
     --lr 1e-2 \
     --weight-decay 5e-4 \

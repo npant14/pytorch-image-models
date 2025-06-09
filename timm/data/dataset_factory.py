@@ -27,7 +27,7 @@ try:
 except ImportError:
     has_imagenet = False
 
-from .dataset import IterableImageDataset, ImageDataset
+from .dataset import IterableImageDataset, ImageDataset, ImagenetWithPaths
 
 _TORCH_BASIC_DS = dict(
     cifar10=CIFAR10,
@@ -63,6 +63,7 @@ def _search_split(root, split):
 def create_dataset(
         name: str,
         root: Optional[str] = None,
+        return_paths: bool = False,
         split: str = 'validation',
         search_split: bool = True,
         class_map: dict = None,
@@ -144,7 +145,10 @@ def create_dataset(
             assert has_imagenet, 'Please update to a newer PyTorch and torchvision for ImageNet dataset.'
             if split in _EVAL_SYNONYM:
                 split = 'val'
-            ds = ImageNet(split=split, root=torch_kwargs['root'])
+            if return_paths:
+                ds = ImagenetWithPaths(split=split, root=torch_kwargs['root'])
+            else:
+                ds = ImageNet(split=split, root=torch_kwargs['root'])
         elif name == 'image_folder' or name == 'folder':
             # in case torchvision ImageFolder is preferred over timm ImageDataset for some reason
             if search_split and os.path.isdir(root):

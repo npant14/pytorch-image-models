@@ -78,6 +78,12 @@ if not os.path.exists(CSV_FILE):
     CSV_FILE = "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
 if not os.path.exists(MASK_LOOKUP_JSON):
     MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
+import pandas as pd
+
+csv_df = pd.read_csv(CSV_FILE)
+
+lookup_file_scale = dict(zip(csv_df['Image File'], csv_df['scale_band']))
+
 
 torch.autograd.set_detect_anomaly(True)
 has_compile = hasattr(torch, 'compile')
@@ -315,7 +321,7 @@ def scale_bands_range(bands,new_max,new_min=0,  old_min=0, old_max=10):
     Maps integer 'bands' in [old_min..old_max] to a new range [new_min..new_max].
     If you want discrete buckets, you can add rounding or integer division.
     """
-    
+    bands = torch.tensor(bands)
     old_range = old_max - old_min
     new_range = new_max - new_min
     
@@ -340,6 +346,16 @@ def save_image(image, filename):
     plt.imsave(filename, image_np)
     print(f"Saved image to {filename}")
 
+def get_scale_band(paths):
+    scale_band = []
+    for path in paths[0]:
+        item = path.split('/')[-1]
+        if item in lookup_file_scale:
+            scale = lookup_file_scale[item]
+        else:
+            scale = 2
+        scale_band.append(scale)
+    return scale_band
 
 def train_one_epoch(
         epoch,
@@ -378,8 +394,9 @@ def train_one_epoch(
     data_start_time = update_start_time = time.time()
     optimizer.zero_grad()
     update_sample_count = 0
-    for batch_idx, (input, target, scale_band, center) in enumerate(loader):
+    for batch_idx, (input, target, paths) in enumerate(loader):
 
+        scale_band = get_scale_band(paths)
         # save one image from the batch for debugging
         if batch_idx == 0:
             save_image(input[0], f"input_{batch_idx}.png")
@@ -388,12 +405,12 @@ def train_one_epoch(
         
         input = input.to(device)
         target = target.to(device)
-        scale_band = scale_band.to(device)
+        #scale_band = scale_band.to(device)
         #scale_band = scale_band  # So larger scale_band is smaller loss
        
         scale_band = scale_bands_range(scale_band,new_min=0, new_max=num_bands)
         scale_band = 5 - scale_band
-        center = center.to(device)
+        #center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
@@ -639,6 +656,7 @@ def main():
 
     dataset_train = create_dataset(
         args.dataset,
+        return_paths=True, 
         root=args.data_dir,
         split=args.train_split,
         is_training=True,
@@ -652,25 +670,42 @@ def main():
         target_key=args.target_key,
         num_samples=args.train_num_samples,
     )
-    # create_loader_scale is presumably a custom loader that reads scale info from CSV
-    loader_train = create_loader_scale(
-        csv_file = CSV_FILE,
-        root_dir = ROOT_DIR,
-        mask_look_up_json = MASK_LOOKUP_JSON,
-        root = args.data_dir, 
+    train_interpolation = "bilinear" #args.train_interpolation
+    print(args.scale)
+    if args.no_aug or not train_interpolation:
+        train_interpolation = data_config['interpolation']
+    collate_fn = None
+    mixup_fn = None
+    num_aug_splits = 0
+    loader_train = create_loader(
+        dataset_train,
         input_size=data_config['input_size'],
         batch_size=args.batch_size,
         is_training=True,
         no_aug=args.no_aug,
+        re_prob=0, #args.reprob,
+        re_mode='pixel', # shouldn't matter args.remode,
+        re_count=0, #args.recount,
+        re_split=False, #args.resplit,
         train_crop_mode=args.train_crop_mode,
+        scale=args.scale, # [1,1]
+        ratio=[1,1],#args.ratio,
         hflip=args.hflip,
-        interpolation=data_config['interpolation'],
-        scale=args.scale,
+        vflip=0, #args.vflip,
+        color_jitter=None,#args.color_jitter,
+        color_jitter_prob=None, #args.color_jitter_prob,
+        grayscale_prob=None, #args.grayscale_prob,
+        gaussian_blur_prob=None, #args.gaussian_blur_prob,
+        auto_augment=None, #args.aa,
+        num_aug_repeats=0, #args.aug_repeats,
+        num_aug_splits=num_aug_splits,
+        interpolation=train_interpolation,
         mean=data_config['mean'],
         std=data_config['std'],
         num_workers=args.workers,
         distributed=args.distributed,
-        pin_memory=False,
+        collate_fn=collate_fn,
+        pin_memory=False, #args.pin_mem,
         device=device,
         use_prefetcher=args.prefetcher,
         use_multi_epochs_loader=args.use_multi_epochs_loader,
