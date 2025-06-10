@@ -63,7 +63,7 @@ done
 
 echo "Using experiment name: ${EXPERIMENT_NAME}"
 
-# sh distributed_train.sh $GPUS train_skeleton.py \
+# TORCH_DISTRIBUTED_DEBUG=INFO sh distributed_train.sh $GPUS train_skeleton.py \
 #     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
 #     --dataset $DATASET \
 #     --model $MODEL \
@@ -84,12 +84,11 @@ echo "Using experiment name: ${EXPERIMENT_NAME}"
 #     --train-crop-mode rrc \
 #     --input-size $INPUT_SIZE \
 #     --experiment $EXPERIMENT_NAME \
-#     --output $OUTPUT_DIR
+#     --output $OUTPUT_DIR \
 #     --workers $WORKERS \
 
 
 # MNIST
-# /files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/
 
 sh distributed_train.sh $GPUS train_skeleton.py \
     --data-dir /oscar/data/tserre/xyu110/mnist \
