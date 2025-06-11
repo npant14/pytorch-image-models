@@ -631,16 +631,20 @@ class S1_Res(nn.Module):
 class S1_Res_1_channel(nn.Module):
     def __init__(self):
         ## CHANGED THIS TO ACCEPT INPUT OF SIZE 1
-        super(S1_Res, self).__init__()
+        super(S1_Res_1_channel, self).__init__()
         self.layer1 = nn.Sequential(
-            Residual(1, 48, strides=2),
-            Residual(48, 48),
-            Residual(48, 96, strides=2)
+            Residual(1, 4, strides=2),
+            # Residual(48, 48),
+            # Residual(48, 96, strides=2)
         )
+
+    def run_layer(self, x):
+        ori_size = (x.shape[-2], x.shape[-1])
+        return pad_to_size(torch.abs(self.layer1(x)), ori_size)
 
     def forward(self, x_pyramid):
         if type(x_pyramid) == list:
-            return [self.layer1(x) for x in x_pyramid]
+            return [self.run_layer(x) for x in x_pyramid]
         else:
             return self.layer1(x_pyramid)
 
@@ -1018,7 +1022,7 @@ class HMAX_IP_replace_s(nn.Module):
                     num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
                     c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
 
-        self.s2b_before_1 = S2(channels_in=96, channels_out=128, kernel_size=3, stride=1)
+        self.s2b_before_1 = S2(channels_in=4, channels_out=128, kernel_size=3, stride=1)
         self.s2b_before_2 = S2(channels_in=128, channels_out=128, kernel_size=3, stride=1)
         self.s2b_before_3 = S2(channels_in=128, channels_out=128, kernel_size=3, stride=1)
 

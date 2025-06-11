@@ -1043,6 +1043,7 @@ def train_one_epoch(
         mixup_fn=None,
         num_updates_total=None,
 ):
+    print("starting epoch", flush=True)
     running_loss = 0.
     last_loss = 0.
     # if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
@@ -1050,6 +1051,7 @@ def train_one_epoch(
     #         loader.mixup_enabled = False
     #     elif mixup_fn is not None:
     #         mixup_fn.mixup_enabled = False
+    print("what", flush=True)
 
     second_order = False #hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
     # has_no_sync = hasattr(model, "no_sync")
@@ -1060,6 +1062,7 @@ def train_one_epoch(
     model.train()
     if args.add_wrapped_schedulefree:
         optimizer.train()
+    print("is", flush=True)
 
     accum_steps = 1 #args.grad_accum_steps
     # last_accum_steps = len(loader) % accum_steps
@@ -1067,11 +1070,13 @@ def train_one_epoch(
     num_updates = epoch * updates_per_epoch
     last_batch_idx = len(loader) - 1
     # last_batch_idx_to_accum = len(loader) - last_accum_steps
+    print("going on", flush=True)
 
     data_start_time = update_start_time = time.time()
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, (input, target) in enumerate(loader):
+        print("starting batch", flush=True)
         last_batch = batch_idx == last_batch_idx
         need_update = True #last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1086,7 +1091,7 @@ def train_one_epoch(
         #     input = input.contiguous(memory_format=torch.channels_last)
 
         # multiply by accum steps to get equivalent for full update
-        # data_time_m.update(accum_steps * (time.time() - data_start_time))
+        data_time_m.update(accum_steps * (time.time() - data_start_time))
 
         def _forward():
             scale_loss = 0
@@ -1094,6 +1099,7 @@ def train_one_epoch(
                 is_cl = getattr(model.module if hasattr(model, 'module') else model, 'contrastive_loss', False)
 
                 if is_cl:
+                    print("training with contrastive loss with lambda ", args.cl_lambda)
                     output, scale_loss = model(input)
                     loss = loss_fn(output, target) + (args.cl_lambda * scale_loss)
                 else:
@@ -1141,8 +1147,9 @@ def train_one_epoch(
         #         loss = _forward()
         #         _backward(loss)
         # else:
-
+        print("running forward pass", flush=True)
         loss, scale_loss = _forward()
+        print("running backward pass", flush=True)
         _backward(loss)
 
         running_loss += loss.item()
@@ -1154,9 +1161,9 @@ def train_one_epoch(
             losses_m.update(loss.item() * accum_steps, input.size(0))
         update_sample_count += input.size(0)
 
-        # if not need_update:
-        #     data_start_time = time.time()
-        #     continue
+        if not need_update:
+            data_start_time = time.time()
+            continue
         optimizer.zero_grad()
 
         num_updates += 1
@@ -1165,9 +1172,9 @@ def train_one_epoch(
 
         if args.synchronize_step and device.type == 'cuda':
             torch.cuda.synchronize()
-        # time_now = time.time()
-        # update_time_m.update(time.time() - update_start_time)
-        # update_start_time = time_now
+        time_now = time.time()
+        update_time_m.update(time.time() - update_start_time)
+        update_start_time = time_now
 
         if update_idx % args.log_interval == 0:
             if args.add_wrapped_schedulefree:
@@ -1186,9 +1193,9 @@ def train_one_epoch(
                     f'Train: {epoch} [{update_idx:>4d}/{updates_per_epoch} '
                     f'({100. * (update_idx + 1) / updates_per_epoch:>3.0f}%)]  '
                     f'Loss: {losses_m.val:#.3g} ({losses_m.avg:#.3g})  '
-                    # f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
-                    # f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
-                    # f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
+                    f'Contrastive Loss: {args.cl_lambda*scale_loss.item():#.3g}  '
+                    f'Time: {update_time_m.val:.3f}s, {update_sample_count / update_time_m.val:>7.2f}/s  '
+                    f'({update_time_m.avg:.3f}s, {update_sample_count / update_time_m.avg:>7.2f}/s)  '
                     f'LR: {lr:.3e}  '
                     f'Data: {data_time_m.val:.3f} ({data_time_m.avg:.3f})'
                 )

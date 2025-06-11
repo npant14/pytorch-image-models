@@ -14,6 +14,7 @@ partition=${10:-"gpu"}  # "gpu", "gpu-he", "gracehopper"
 scale=${11:-1.0}  # or 0.08
 input_size=${12:-322} # or 227
 
+
 # Add bypass suffix if True
 if [ "$bypass" = "True" ]; then
     bypass_str="_bypass"
@@ -22,7 +23,7 @@ else
 fi
 
 # Create job name
-job_name="${model}_ip${ip_bands}_cl${cl_lambda}_cls${cls_input_size}_gpu${gpus}_b${batch_size}${bypass_str}_size_${input_size}_scale_${scale}"
+job_name="${model}_ip${ip_bands}_cl${cl_lambda}_cls${cls_input_size}_gpu${gpus}_b${batch_size}${bypass_str}_size_${input_size}_scale_${scale}_lr_${lr}_dataset_mnist-scale"
 
 mkdir -p job_scripts
 
@@ -30,8 +31,9 @@ mkdir -p job_scripts
 temp_script="job_scripts/job_${job_name}.sh"
 cp submit_template.sh $temp_script
 
-cpu_per_gpu=1
-mem_per_gpu=8
+cpu_per_gpu=2
+# mem_per_gpu=16
+cpus=$((gpus * cpu_per_gpu))
 
 if [ "${partition}" = "gpu-he" ]; then
     cpu_per_gpu=2

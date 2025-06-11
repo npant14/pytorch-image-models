@@ -7,8 +7,6 @@
 #SBATCH -o JOB_NAME.out
 #SBATCH -e JOB_NAME.err
 #SBATCH -J JOB_NAME
-#SBATCH --mail-user=xizheng_yu@brown.edu
-#SBATCH --mail-type=END,FAIL
 
 # Check if modules are loaded
 if ml 2>&1 | grep -q "No modules loaded"; then
@@ -21,7 +19,7 @@ fi
 
 which python
 
-cd /users/xyu110/pytorch-image-models
+cd /users/npant1/pytorch-image-models
 
 # wait 10 seconds
 sleep 10
@@ -49,7 +47,7 @@ if [ $IMAGE_SCALE = 0.08 ]; then
 fi
 
 # Check if directory exists and append suffix if needed
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/4"
+OUTPUT_DIR="/oscar/data/tserre/npant1/pytorch-output/train/"
 mkdir -p OUTPUT_DIR
 SUFFIX_COUNT=1
 
@@ -112,45 +110,20 @@ echo "Using experiment name: ${EXPERIMENT_NAME}"
 
 
 # alexnet
-sh distributed_train.sh $GPUS train_skeleton.py \
-    --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-    --dataset $DATASET \
-    --model $MODEL \
-    --model-kwargs ip_scale_bands=$IP_BANDS \
-    --opt sgd \
-    -b 128 \
-    --epochs 90 \
-    --lr 0.01 \
-    --weight-decay 5e-4 \
-    --sched step \
-    --decay-epochs 30 \
-    --decay-rate 0.1 \
-    --lr-cycle-decay 0.1 \
-    --momentum 0.9 \
-    --warmup-epochs 0 \
-    --hflip 0.5 \
-    --scale $IMAGE_SCALE 1.0 \
-    --train-crop-mode rrc \
-    --input-size $INPUT_SIZE \
-    --experiment $EXPERIMENT_NAME \
-    --output $OUTPUT_DIR \
-    --workers $WORKERS
-
-# vgg
 # sh distributed_train.sh $GPUS train_skeleton.py \
-#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-#     --dataset $DATASET \
+#     --data-dir /oscar/scratch/npant1/unzipped/files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/ \
+#     --num-classes 10 \
 #     --model $MODEL \
-#     --model-kwargs ip_scale_bands=$IP_BANDS \
+#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
 #     --opt sgd \
-#     -b 32 \
-#     --epochs 75 \
-#     --lr 0.01 \
+#     -b $BATCH_SIZE \
+#     --epochs 30 \
+#     --lr $LR \
 #     --weight-decay 5e-4 \
 #     --sched step \
 #     --momentum 0.9 \
 #     --lr-cycle-decay 0.1 \
-#     --decay-epochs 25 \
+#     --decay-epochs 10 \
 #     --warmup-epochs 0 \
 #     --hflip 0.5 \
 #     --scale $IMAGE_SCALE 1.0 \
@@ -158,4 +131,42 @@ sh distributed_train.sh $GPUS train_skeleton.py \
 #     --input-size $INPUT_SIZE \
 #     --experiment $EXPERIMENT_NAME \
 #     --output $OUTPUT_DIR \
-#     --workers $WORKERS
+#     --cl-lambda $CL_LAMBDA \
+#     --workers $WORKERS \
+#     --input-size $INPUT_SIZE \
+#     --workers $GPUS \
+
+BATCH_SIZE=BATCH_SIZE_VALUE
+BYPASS=BYPASS_VALUE
+BYPASS_STR=BYPASS_STR_VALUE
+
+# HMAX Old
+sh distributed_train.sh $GPUS train_skeleton.py \
+    --data-dir /oscar/scratch/npant1/unzipped/files22_lrsresearch/CLPS_Serre_Lab/prj_hmax/data/mnist-scale/Like_Lindeberg_smoothning_and_non_linear/scale2000/ \
+    --num-classes 10 \
+    --model $MODEL \
+    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE\
+    --opt adam \
+    -b $BATCH_SIZE \
+    --epochs 30 \
+    --lr $LR \
+    --weight-decay 5e-4 \
+    --sched step \
+    --momentum 0.9 \
+    --lr-cycle-decay 0.1 \
+    --decay-epochs 10 \
+    --warmup-epochs 0 \
+    --hflip 0.5 \
+    --scale $IMAGE_SCALE 1.0 \
+    --train-crop-mode rrc \
+    --input-size $INPUT_SIZE \
+    --experiment $EXPERIMENT_NAME \
+    --output $OUTPUT_DIR \
+    --cl-lambda $CL_LAMBDA \
+    --workers $WORKERS \
+    --input-size $INPUT_SIZE \
+    --workers $GPUS \
+
+BATCH_SIZE=BATCH_SIZE_VALUE
+BYPASS=BYPASS_VALUE
+BYPASS_STR=BYPASS_STR_VALUE
