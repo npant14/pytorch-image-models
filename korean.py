@@ -75,7 +75,7 @@ class korean_dataloader():
 class Korean():
     def __init__(self, model, outdir, device, data_dir, img_size=322, layer = "s3.layer.3.conv3"):
         self.model = model
-        self.outdir = outdir
+        self.outdir = os.path.join(outdir, layer)
         self.device = device
         self.data_dir = data_dir
         self.img_size = img_size
@@ -134,6 +134,9 @@ class Korean():
                     resized_img = self.resize_image(im1[0], size_1)
                     features = layer_features(torch.unsqueeze(resized_img, 0).to(self.device))
                     tensor_feature = features[layer_name]
+                    # old hmax go deeper
+                    if 'model_pre.c2b' == layer_name:
+                        tensor_feature = features[layer_name][0][0]
                     rowfeat = torch.squeeze(torch.flatten(tensor_feature))
 
 
@@ -141,6 +144,9 @@ class Korean():
                     resized_img = self.resize_image(im2[0], size_2)
                     features = layer_features(torch.unsqueeze(resized_img, 0).to(self.device))
                     tensor_feature = features[layer_name]
+                    # old hmax go deeper
+                    if 'model_pre.c2b' == layer_name:
+                        tensor_feature = features[layer_name][0][0]
                     colfeat = torch.squeeze(torch.flatten(tensor_feature))
 
                     ij_corr = self.get_pearson_correlation(rowfeat, colfeat)
@@ -223,7 +229,7 @@ class Korean():
                             best_accuracy = acc
                             best_threshold = thresh
                     
-                    # print(f"best threshold : {best_threshold}")
+                    print(f"best threshold : {best_threshold}")
                     # print(f"best accuracy : {best_accuracy}")
 
                     test_correctly_above_threshold = sum(i > best_threshold for i in correct + test_correct)
@@ -235,13 +241,13 @@ class Korean():
 
                 print(f"average test accuracy : {sum(collect)/len(collect)}")
                 means[(target_size, test_size)] = sum(collect)/len(collect)
-                print(f"max test accuracy : {max(collect)}")
-                maxes[(target_size, test_size)] = max(collect)
-                print(f"std test accuracy : {statistics.pstdev(collect)}")
-                errs[(target_size, test_size)] = statistics.pstdev(collect)
+                # print(f"max test accuracy : {max(collect)}")
+                # maxes[(target_size, test_size)] = max(collect)
+                # print(f"std test accuracy : {statistics.pstdev(collect)}")
+                # errs[(target_size, test_size)] = statistics.pstdev(collect)
                 
         return means
-
+    
     def set_layer(self, layer_name):
         self.layer = layer_name
 
@@ -253,27 +259,6 @@ class Korean():
         print(accs)
         return accs
     
-def load_chresmax_v3_bypass_only():
-    kwargs = {
-        'ip_scale_bands': 11,
-        'classifier_input_size': 4096,
-        'bypass': True,
-        'c_debug': False,
-    }
-    model = create_model(
-        'chresmax_v3_bypass_only',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/mnist/ip_11_chresmax_v3_bypass_only_gpu_2_cl_0.1_ip_3_224_224_4096_c1[_6,3,1_]_bypass_3/last.pth.tar',
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers if "s2b" in layer and "conv" in layer]
-    print(layers)
-    return model
 
 def load_chresmax_v3():
     kwargs = {
@@ -298,6 +283,76 @@ def load_chresmax_v3():
     return model
 
 
+def load_chresmax_abs_bypass_only(layername=None):
+    kwargs = {
+        'ip_scale_bands': 16,
+        'classifier_input_size': 9216,
+        'bypass': True,
+        'c_debug': False,
+    }
+    model = create_model(
+        'chresmax_abs_bypass_only',
+        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_16_chresmax_abs_bypass_only_gpu_8_cl_0.1_ip_3_224_224_9216_c1[_6,3,1_]_bypass',
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers if "c2b" in layer]
+    print(layers)
+    return model, 'chresmax_abs_bypass_only', layername, layers
+
+
+def load_chmax(layername=None):
+    kwargs = {
+        'ip_scale_bands': 18,
+        'classifier_input_size': 4096,
+        'bypass': True,
+        'c_debug': False,
+    }
+    # "/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
+    # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
+    model = create_model(
+        'hmax_old',
+        pretrained="/oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt",
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers if "c2b" in layer]
+    print(layers)
+    return model, "hmax_old", layername, layers
+
+
+def load_chresmax_v3_bypass_only(layername=None):
+    kwargs = {
+        'ip_scale_bands': 11,
+        'classifier_input_size': 4096,
+        'bypass': True,
+        'c_debug': False,
+    }
+    model = create_model(
+        'chresmax_v3_bypass_only',
+        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar',
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers if "c2b" in layer]
+    print(layers)
+    return model, 'chresmax_v3_bypass_only', layername, layers
+
 
 def test_loaded_model(model):
     if next(model.parameters()).is_cuda:
@@ -314,12 +369,32 @@ def test_loaded_model(model):
     except Exception as e:
         print(f"❌ Model forward pass failed: {e}")
     
+    
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = load_chresmax_v3()
+    # model, modelname, layername, all_layers = load_chmax("model_pre.c2b")
+    model, modelname, layername, all_layers = load_chresmax_v3_bypass_only("model_backbone.c2b_seq")
+    # model, modelname, layername, all_layers = load_chresmax_abs_bypass_only("model_backbone.c2b_score")
     model = model.to(device)
     test_loaded_model(model)
     
-    korean = Korean(model, './korean/v3', device, '/gpfs/data/tserre/npant1/hangul_data', 224, "model_backbone.s3.layer.3.conv3")
-    korean.run()
+    for layername in all_layers:
+        try:
+            korean = Korean(model,
+                            os.path.join('./korean', modelname),
+                            device,
+                            '/gpfs/data/tserre/npant1/hangul_data',
+                            224,
+                            layername)
+            korean.run()
+        except Exception as e:
+            print(f"Error running Korean experiment for layer {layername}: {e}")
+            # write error to txt file
+            with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
+                f.write(f"Error running Korean experiment for layer {layername}: {e}\n")
+                
+    # 20: {('13', '13'): np.float64(0.509962962962966), ('13', '52'): np.float64(0.470888888888893), ('52', '13'): np.float64(0.4803888888888914), ('13', '130'): np.float64(0.511314814814815), ('130', '13'): np.float64(0.5477777777777786)}
+    # 41: {('13', '13'): np.float64(0.51666666666667), ('13', '52'): np.float64(0.48720370370370647), ('52', '13'): np.float64(0.5038333333333351), ('13', '130'): np.float64(0.5233518518518488), ('130', '13'): np.float64(0.5800370370370412)}
+    # 50: {('13', '13'): np.float64(0.5181111111111145), ('13', '52'): np.float64(0.4972037037037045), ('52', '13'): np.float64(0.5116296296296325), ('13', '130'): np.float64(0.5281481481481427), ('130', '13'): np.float64(0.5915925925925996)}
+    # 54: {('13', '13'): np.float64(0.518518518518522), ('13', '52'): np.float64(0.5), ('52', '13'): np.float64(0.518518518518522), ('13', '130'): np.float64(0.5370370370370258), ('130', '13'): np.float64(0.5925925925926)
