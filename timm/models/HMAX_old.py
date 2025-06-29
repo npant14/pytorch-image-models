@@ -439,7 +439,7 @@ class S2(nn.Module):
                                                      nn.ReLU(True)
                                                     ))
 
-        self.batchnorm = nn.BatchNorm2d(channels_out, 1e-3)
+        # self.batchnorm = nn.BatchNorm2d(channels_out, 1e-3)
 
 
     def forward(self, x_pyramid, prj_name = None, MNIST_Scale = None, category = None, x_input = None, save_rdms = None, plt_filters = None):
@@ -742,6 +742,271 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
             return output, c2b_maps[0].squeeze(), max_scale_index, correct_scale_loss
 
 
+class HMAX_IP_basic_single_band_alex_deep(nn.Module):
+    def __init__(self,
+                 ip_scales = 18,
+                 s1_scale=13, #25 #23 #21 #19 #17 #15 #13 #11 # 7, #5
+                 s1_la=6.8, #14.1 #12.7 #11.5 #10.3 #9.1 #7.9 #6.8 #5.6 # 3.5, # 2.5
+                 s1_si=5.4, #11.3 #10.2 #9.2 #8.2 #7.3 #6.3 #5.4 #4.5 # 2.8, # 2
+                 n_ori=96,
+                 num_classes=1000,
+                 s1_trainable_filters=False,
+                 visualize_mode = False,
+                 prj_name = None,
+                 MNIST_Scale = None,
+                 category = None,
+                 single_scale_bool = True,
+                 ):
+        super(HMAX_IP_basic_single_band_alex_deep, self).__init__()
+        self.ip_scales = 1
+        self.ip_scale_bands = ip_scales
+        self.single_scale_bool = False
+        self.make_ip_2_bool = False
+
+        self.argmax_bool = False
+
+        # A few settings
+        self.s1_scale = s1_scale
+        self.s1_la = s1_la
+        self.s1_si = s1_si
+        self.n_ori = n_ori
+        self.num_classes = num_classes
+        self.s1_trainable_filters = s1_trainable_filters
+        self.MNIST_Scale = MNIST_Scale
+        self.category = category
+        self.prj_name = prj_name
+        self.scale = 96
+
+        self.same_scale_viz = None
+        self.base_scale = None
+        self.orcale_bool = None
+        self.save_rdms = []
+        self.plt_filters = []
+
+        self.force_const_size_bool = False
+
+        self.c1_sp_kernel_sizes = [12,10]
+
+        ########################################################
+        ########################################################
+        # Reverese
+        # self.c1_sp_kernel_sizes.reverse()
+
+        print('c1_sp_kernel_sizes : ',self.c1_sp_kernel_sizes)
+    
+        ########################################################
+        ########################################################
+        # Setting the scale stride and number of scales pooled at a time
+        self.c_scale_stride = 1
+        self.c_num_scales_pooled = 2
+
+        self.c1_scale_stride = self.c_scale_stride
+        self.c1_num_scales_pooled = self.c_num_scales_pooled
+        
+        # Global pooling (spatially)
+        self.c2b_scale_stride = self.c_scale_stride
+        self.c2b_num_scales_pooled = ip_scales-1 #len(self.c1_sp_kernel_sizes)  # all of them
+
+
+        ########################################################
+        # Feature extractors (in the order of the table in Figure 1)
+        self.s1 = S1(scale=self.s1_scale, n_ori=n_ori, padding='valid', trainable_filters = True, #s1_trainable_filters,
+                     la=self.s1_la, si=self.s1_si, visualize_mode = visualize_mode, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
+        self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
+                    num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
+                    c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
+
+        self.s2b_before_1 = S2(channels_in=n_ori, channels_out=256, kernel_size=3, stride=1)
+        self.s2b_before_2 = S2(channels_in=256, channels_out=384, kernel_size=3, stride=1)
+        self.s2b_before_3 = S2(channels_in=384, channels_out=256, kernel_size=3, stride=1)
+
+        self.s2b = S2(channels_in=256, channels_out=256, kernel_size=[4, 8, 12, 16], stride=1, s2b_bool = True)
+        self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+                     num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+    
+        ########################################################
+
+        # # Classifier
+        self.classifier = nn.Sequential(
+                                        nn.Linear(self.get_s4_in_channels(), 256),  # fc1
+                                        nn.Dropout(0.2),
+                                        nn.Linear(256, num_classes)  # fc3
+                                        )
+
+        # self.overall_max_scale_index = []
+
+
+    def get_s4_in_channels(self):
+       
+        c2b_out = len(self.s2b.kernel_size) * self.s2b.s_0[0].weight.shape[0]
+        s4_in = c2b_out
+
+        return s4_in
+
+
+    def make_ip(self, x, same_scale_viz = None, base_scale = None, ip_scales = None, scale = None):
+
+        if ip_scales and scale:
+            # print("In right condition")
+            ip_scales = ip_scales
+            scale = scale
+            const_size_bool = True or self.force_const_size_bool
+        else:
+            ip_scales = self.ip_scales
+            scale = self.scale #5
+            const_size_bool = False or self.force_const_size_bool
+
+        # if self.MNIST_Scale == 1000:
+        #     center_crop = torchvision.transforms.CenterCrop(140)
+        #     x = center_crop(x)
+
+        base_image_size = int(x.shape[-1]) 
+        # print('base_image_size : ',base_image_size)
+        
+        if ip_scales == 1:
+            image_scales_down = [base_image_size]
+            image_scales_up = []
+        elif ip_scales == 2:
+            image_scales_up = []
+            image_scales_down = [np.ceil(base_image_size/(2**(1/scale))), base_image_size]
+        else:
+            image_scales_down = [np.ceil(base_image_size/(2**(i/scale))) for i in range(int(np.ceil(ip_scales/2)))]
+            image_scales_up = [np.ceil(base_image_size*(2**(i/scale))) for i in range(1, int(np.ceil(ip_scales/2)))]
+        
+
+        image_scales = image_scales_down + image_scales_up
+        index_sort = np.argsort(image_scales)
+        index_sort = index_sort[::-1]
+        self.image_scales = [image_scales[i_s] for i_s in index_sort]
+
+
+        if const_size_bool:
+            base_image_size = 112
+        else:
+            base_image_size = int(x.shape[-1]) 
+
+
+        # print('base_image_size : ',base_image_size)
+        # print('self.image_scales : ',self.image_scales)
+
+        if len(self.image_scales) > 1:
+            # print('Right Hereeeeeee: ', self.image_scales)
+            image_pyramid = []
+            for i_s in self.image_scales:
+                i_s = int(i_s)
+                # print('i_s : ',i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear').clamp(min=0, max=1)
+
+                if const_size_bool:
+                    # Padding or Cropping
+                    if i_s <= base_image_size:
+                        interpolated_img = pad_to_size(interpolated_img, (base_image_size, base_image_size))
+                    elif i_s > base_image_size:
+                        center_crop = torchvision.transforms.CenterCrop(base_image_size)
+                        interpolated_img = center_crop(interpolated_img)
+                
+                # print('interpolated_img : ',interpolated_img.shape,' ::: i_s : ',i_s,' ::: base_image_size : ',base_image_size)
+                image_pyramid.append(interpolated_img)
+
+                # # print('image_pyramid : ',image_pyramid[-1].shape,' ::: i_s : ',i_s,' ::: base_image_size : ',base_image_size)
+
+            # print('image_pyramid len : ',len(image_pyramid))
+
+            return image_pyramid
+        else:
+            # print('Hereeeeeee')
+            ##############################################################################
+            if self.orcale_bool:
+                # FOr oracle:
+                if x.shape[-1] > 224:
+                    center_crop = torchvision.transforms.CenterCrop(224)
+                    x = center_crop(x)
+                elif x.shape[-1] < 224:
+                    x = pad_to_size(x, (224, 224))
+            ##############################################################################
+
+            return [x]
+
+    def make_ip_2(self, x, same_scale_viz = None, base_scale = None, scale = None):
+
+        base_image_size = int(x.shape[-1]) 
+
+        if scale > 1:
+            image_scales_up = [np.ceil(base_image_size*scale), base_image_size]
+            image_scales_down = []
+        else:
+            image_scales_up = []
+            image_scales_down = [base_image_size, np.ceil(base_image_size/scale)]
+
+        image_scales = image_scales_down + image_scales_up
+        index_sort = np.argsort(image_scales)
+        index_sort = index_sort[::-1]
+        self.image_scales = [image_scales[i_s] for i_s in index_sort]
+
+
+        if len(self.image_scales) > 1:
+            # print('Right Hereeeeeee: ', self.image_scales)
+            image_pyramid = []
+            for i_s in self.image_scales:
+                i_s = int(i_s)
+                # print('i_s : ',i_s)
+                interpolated_img = F.interpolate(x, size = (i_s, i_s), mode = 'bilinear').clamp(min=0, max=1)
+
+                image_pyramid.append(interpolated_img)
+
+            return image_pyramid
+
+    def forward(self, x, batch_idx = None, contrastive_scale_loss = False, contrastive_2_bool = False, ip_scales = None, scale = None):
+
+        if x.shape[1] == 3:
+            # print('0 1 : ',torch.equal(x[:,0:1], x[:,1:2]))
+            # print('1 2 : ',torch.equal(x[:,1:2], x[:,2:3]))
+            x = x[:,0:1]
+
+        correct_scale_loss = 0
+
+        ###############################################
+        if not self.make_ip_2_bool:
+            x_pyramid = self.make_ip(x, same_scale_viz = self.same_scale_viz, base_scale = self.base_scale, ip_scales = ip_scales, scale = scale) # Out 17 Scales x BxCxHxW --> C = 3
+        else:
+            x_pyramid = self.make_ip_2(x, same_scale_viz = self.same_scale_viz, base_scale = self.base_scale) # Out 17 Scales x BxCxHxW --> C = 3
+
+        # print('x_pyramid : ',len(x_pyramid))
+        ###############################################
+        s1_maps = self.s1(x_pyramid, self.MNIST_Scale, batch_idx, prj_name = self.prj_name, category = self.category, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 17 Scales x BxCxHxW --> C = 4
+        c1_maps = self.c1(s1_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, same_scale_viz = self.same_scale_viz, base_scale = self.base_scale, c1_sp_kernel_sizes = self.c1_sp_kernel_sizes, image_scales = self.image_scales, save_rdms = self.save_rdms, plt_filters = self.plt_filters)  # Out 16 Scales x BxCxHxW --> C = 4
+
+        ###############################################
+        s2b_bef_maps_1 = self.s2b_before_1(c1_maps, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
+        s2b_bef_maps_2 = self.s2b_before_2(s2b_bef_maps_1, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
+        s2b_bef_maps_3 = self.s2b_before_3(s2b_bef_maps_2, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
+
+        # c2b_bef_maps = []
+        # for s2b_bef_i in range(len(s2b_bef_maps_2)):
+        #     c2b_bef_maps.append(self.c2b_before(s2b_bef_maps_2[s2b_bef_i]))
+
+        ###############################################
+        # ByPass Route
+        s2b_maps = self.s2b(s2b_bef_maps_3, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
+        c2b_maps, c2b_scale_maps, max_scale_index, correct_scale_loss = self.c2b(s2b_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, same_scale_viz = self.same_scale_viz, \
+                                                                        base_scale = self.base_scale, image_scales = self.image_scales, save_rdms = self.save_rdms, plt_filters = self.plt_filters, \
+                                                                        scale_loss = False, argmax_bool = self.argmax_bool) # Overall x BxCx1x1 --> C = 2000
+        
+
+        ###############################################
+        c2b_maps_flatten = torch.flatten(c2b_maps[0], 1) # Shape --> 1 x B x 400 x 1 x 1 
+
+        if contrastive_2_bool:
+            output = c2b_maps_flatten
+        else:
+            # Classify
+            output = self.classifier(c2b_maps_flatten)
+
+        if contrastive_2_bool:
+            return output, c2b_scale_maps, max_scale_index, correct_scale_loss
+        else:
+            return output, c2b_maps[0].squeeze(), max_scale_index, correct_scale_loss
+
 #########################################################################################################
 class HMAX_2_streams(nn.Module):
     def __init__(self,
@@ -864,3 +1129,30 @@ def hmax_old(pretrained=False, **kwargs):
         
     return model
 
+
+@register_model
+def hmax_old_deep(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 96
+    n_classes=10
+    visualize_mode = False 
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    backbone = HMAX_IP_basic_single_band_alex_deep(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes, visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
+    model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+        
+    if pretrained:
+        model.model_pre.base_scale = 224
+        model.ip_scales = 18
+        model.scale = 2
+
+        model.model_pre.ip_scales = 18
+        model.stream_2_bool = False
+        
+    return model
