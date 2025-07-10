@@ -12,8 +12,10 @@ np.random.seed(1)
 import os
 import csv
 import random
+import argparse
 import statistics
 from tqdm import tqdm
+
 
 from timm.models import create_model, load_checkpoint, is_model, list_models
 
@@ -135,7 +137,7 @@ class Korean():
                     features = layer_features(torch.unsqueeze(resized_img, 0).to(self.device))
                     tensor_feature = features[layer_name]
                     # old hmax go deeper
-                    if 'model_pre.c2b' == layer_name:
+                    if type(tensor_feature) is tuple or type(tensor_feature) is list:
                         tensor_feature = features[layer_name][0][0]
                     rowfeat = torch.squeeze(torch.flatten(tensor_feature))
 
@@ -145,7 +147,7 @@ class Korean():
                     features = layer_features(torch.unsqueeze(resized_img, 0).to(self.device))
                     tensor_feature = features[layer_name]
                     # old hmax go deeper
-                    if 'model_pre.c2b' == layer_name:
+                    if type(tensor_feature) is tuple or type(tensor_feature) is list:
                         tensor_feature = features[layer_name][0][0]
                     colfeat = torch.squeeze(torch.flatten(tensor_feature))
 
@@ -301,7 +303,7 @@ def load_chresmax_abs_bypass_only(layername=None):
     )
     layers = dict([*model.named_modules()]).keys()
     # filter layers
-    layers = [layer for layer in layers if "c2b" in layer]
+    layers = [layer for layer in layers]
     print(layers)
     return model, 'chresmax_abs_bypass_only', layername, layers
 
@@ -326,9 +328,33 @@ def load_chmax(layername=None):
     )
     layers = dict([*model.named_modules()]).keys()
     # filter layers
-    layers = [layer for layer in layers if "c2b" in layer]
+    layers = [layer for layer in layers]
     print(layers)
     return model, "hmax_old", layername, layers
+
+def load_hmax_new_tricks(layername=None):
+    kwargs = {
+        'ip_scale_bands': 18,
+        'classifier_input_size': 4096,
+        'bypass': True,
+        'c_debug': False,
+    }
+    # "/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
+    # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
+    model = create_model(
+        'hmax_new_tricks',
+        pretrained="/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_new_tricks_gpu_8_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers]
+    print(layers)
+    return model, "hmax_new_tricks", layername, layers
 
 
 def load_chresmax_v3_bypass_only(layername=None):
@@ -349,9 +375,21 @@ def load_chresmax_v3_bypass_only(layername=None):
     )
     layers = dict([*model.named_modules()]).keys()
     # filter layers
-    layers = [layer for layer in layers if "c2b" in layer]
+    layers = [layer for layer in layers]
     print(layers)
     return model, 'chresmax_v3_bypass_only', layername, layers
+
+def load_models(modelname, layername=None):
+    if modelname == 'hmax_old':
+        return load_chmax(layername)
+    elif modelname == 'chresmax_v3_bypass_only':
+        return load_chresmax_v3_bypass_only(layername)
+    elif modelname == 'chresmax_abs_bypass_only':
+        return load_chresmax_abs_bypass_only(layername)
+    elif modelname == 'hmax_new_tricks':
+        return load_hmax_new_tricks(layername)
+    else:
+        raise ValueError(f"Unknown model name: {modelname}")
 
 
 def test_loaded_model(model):
@@ -371,28 +409,38 @@ def test_loaded_model(model):
     
     
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run Hangul character evaluation for a single model layer.")
+    parser.add_argument('--model_name', type=str, required=True, choices=['hmax_old', 'chresmax_v3_bypass_only', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
+    parser.add_argument('--layer_name', type=str, required=True, help='The specific layer to evaluate.')
+    
+    args = parser.parse_args()
+    
+    
+    layer_to_process = args.layer_name
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # model, modelname, layername, all_layers = load_chmax("model_pre.c2b")
-    model, modelname, layername, all_layers = load_chresmax_v3_bypass_only("model_backbone.c2b_seq")
-    # model, modelname, layername, all_layers = load_chresmax_abs_bypass_only("model_backbone.c2b_score")
-    model = model.to(device)
-    test_loaded_model(model)
+    # model, modelname, layername, all_layers = load_chmax("")
+    # model, modelname, layername, all_layers = load_chresmax_v3_bypass_only("")
+    # model, modelname, layername, all_layers = load_chresmax_abs_bypass_only("")
+    # model, modelname, layername, all_layers = load_hmax_new_tricks("")
+    model, modelname, _, _ = load_models(args.model_name)
     
-    for layername in all_layers:
-        try:
-            korean = Korean(model,
-                            os.path.join('./korean', modelname),
-                            device,
-                            '/gpfs/data/tserre/npant1/hangul_data',
-                            224,
-                            layername)
-            korean.run()
-        except Exception as e:
-            print(f"Error running Korean experiment for layer {layername}: {e}")
-            # write error to txt file
-            with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
-                f.write(f"Error running Korean experiment for layer {layername}: {e}\n")
+    model = model.to(device)
+    
+    try:
+        korean = Korean(model,
+                        os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+                        device,
+                        '/gpfs/data/tserre/npant1/hangul_data',
+                        224,
+                        layer_to_process)
+        korean.run()
+    except Exception as e:
+        print(f"Error running Korean experiment for layer {layer_to_process}: {e}")
+        # write error to txt file
+        with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
+            f.write(f"Error running Korean experiment for layer {layer_to_process}: {e}\n")
                 
     # 20: {('13', '13'): np.float64(0.509962962962966), ('13', '52'): np.float64(0.470888888888893), ('52', '13'): np.float64(0.4803888888888914), ('13', '130'): np.float64(0.511314814814815), ('130', '13'): np.float64(0.5477777777777786)}
     # 41: {('13', '13'): np.float64(0.51666666666667), ('13', '52'): np.float64(0.48720370370370647), ('52', '13'): np.float64(0.5038333333333351), ('13', '130'): np.float64(0.5233518518518488), ('130', '13'): np.float64(0.5800370370370412)}
