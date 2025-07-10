@@ -14,6 +14,8 @@ import os
 import _pickle as pickle
 import random
 
+from .ALEXMAX3_optimized import C_scoring2_optimized
+
 def visualize_map(map):
     map = map.detach().numpy()
     plt.imshow(map)
@@ -476,6 +478,7 @@ class S3(S2):
     # S3 does the same thing as S2
     pass
 
+"""This is just HMAX oldm, now with new C layer for your choice"""
 class HMAX_IP_basic_single_band_deeper(nn.Module):
     def __init__(self,
                  ip_scales = 18,
@@ -490,6 +493,7 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
                  MNIST_Scale = None,
                  category = None,
                  single_scale_bool = True,
+                 use_c_scoring2_optimized = False
                  ):
         super(HMAX_IP_basic_single_band_deeper, self).__init__()
         self.ip_scales = 1
@@ -520,6 +524,8 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         self.force_const_size_bool = False
 
         self.c1_sp_kernel_sizes = [12,10]
+        
+        self.use_c_scoring2_optimized = use_c_scoring2_optimized
 
         ########################################################
         ########################################################
@@ -546,10 +552,7 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         # Feature extractors (in the order of the table in Figure 1)
         self.s1 = S1(scale=self.s1_scale, n_ori=n_ori, padding='valid', trainable_filters = True, #s1_trainable_filters,
                      la=self.s1_la, si=self.s1_si, visualize_mode = visualize_mode, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
-        self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
-                    num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
-                    c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
-
+        
         self.s2b_before_1 = S2(channels_in=n_ori, channels_out=128, kernel_size=3, stride=1)
         self.s2b_before_2 = S2(channels_in=128, channels_out=128, kernel_size=3, stride=1)
         self.s2b_before_3 = S2(channels_in=128, channels_out=128, kernel_size=3, stride=1)
@@ -557,6 +560,33 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         self.s2b = S2(channels_in=128, channels_out=128, kernel_size=[4, 8, 12, 16], stride=1, s2b_bool = True)
         self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
                      num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+        
+        if not self.use_c_scoring2_optimized:
+            self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
+                        num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
+                        c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
+            self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+                        num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+        else:
+            self.c1 = C_scoring2_optimized(
+                num_channels=n_ori,
+                pool_func1=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[0], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[0]))),
+                pool_func2=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[1], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[1]))),
+                skip=self.c1_scale_stride,
+                global_scale_pool=False
+            )
+            self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+                        num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+            
+            # global pooling handles differently, need to set up the pooling functions correctly
+            # self.c2b = C_scoring2_optimized(
+            #     num_channels=len(self.s2b.kernel_size) * 128,  # Calculate based on s2b output channels
+            #     pool_func1=nn.AdaptiveMaxPool2d(1),  # Global pooling
+            #     pool_func2=nn.AdaptiveMaxPool2d(1),  # Global pooling
+            #     skip=self.c2b_scale_stride,
+            #     global_scale_pool=True
+            # )
+            
     
         ########################################################
 
@@ -708,7 +738,12 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         # print('x_pyramid : ',len(x_pyramid))
         ###############################################
         s1_maps = self.s1(x_pyramid, self.MNIST_Scale, batch_idx, prj_name = self.prj_name, category = self.category, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 17 Scales x BxCxHxW --> C = 4
-        c1_maps = self.c1(s1_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, same_scale_viz = self.same_scale_viz, base_scale = self.base_scale, c1_sp_kernel_sizes = self.c1_sp_kernel_sizes, image_scales = self.image_scales, save_rdms = self.save_rdms, plt_filters = self.plt_filters)  # Out 16 Scales x BxCxHxW --> C = 4
+        
+        # Testing the optimized version C Layer
+        if self.use_c_scoring2_optimized:
+            c1_maps = self.c1(s1_maps)
+        else:
+            c1_maps = self.c1(s1_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, same_scale_viz = self.same_scale_viz, base_scale = self.base_scale, c1_sp_kernel_sizes = self.c1_sp_kernel_sizes, image_scales = self.image_scales, save_rdms = self.save_rdms, plt_filters = self.plt_filters)  # Out 16 Scales x BxCxHxW --> C = 4
 
         ###############################################
         s2b_bef_maps_1 = self.s2b_before_1(c1_maps, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
@@ -722,6 +757,11 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         ###############################################
         # ByPass Route
         s2b_maps = self.s2b(s2b_bef_maps_3, MNIST_Scale = self.MNIST_Scale, prj_name = self.prj_name, category = self.category, x_input = x_pyramid, save_rdms = self.save_rdms, plt_filters = self.plt_filters) # Out 15 Scales x BxCxHxW --> C = 2000
+        
+        # Testing the optimized version C Layer
+        # if self.use_c_scoring2_optimized:
+        #     c2b_maps = self.c2b(s2b_maps)
+        # else:
         c2b_maps, c2b_scale_maps, max_scale_index, correct_scale_loss = self.c2b(s2b_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, same_scale_viz = self.same_scale_viz, \
                                                                         base_scale = self.base_scale, image_scales = self.image_scales, save_rdms = self.save_rdms, plt_filters = self.plt_filters, \
                                                                         scale_loss = False, argmax_bool = self.argmax_bool) # Overall x BxCx1x1 --> C = 2000
@@ -1006,6 +1046,354 @@ class HMAX_IP_basic_single_band_alex_deep(nn.Module):
             return output, c2b_scale_maps, max_scale_index, correct_scale_loss
         else:
             return output, c2b_maps[0].squeeze(), max_scale_index, correct_scale_loss
+        
+        
+
+class S2_VGG_Residual(nn.Module):
+    """
+    VGG-style S2 layer that replaces large kernels with multiple 3x3 convolutions
+    and adds residual connections for better gradient flow
+    """
+    def __init__(self, channels_in, channels_out, kernel_size, stride, s2b_bool=False):
+        super(S2_VGG_Residual, self).__init__()
+        
+        self.s2b_bool = s2b_bool
+        self.channels_in = channels_in
+        self.channels_out = channels_out
+        
+        if type(kernel_size) == int:
+            self.kernel_size = [kernel_size]
+        else:
+            self.kernel_size = kernel_size
+            self.kernel_size.sort()
+        
+        # Create VGG-style layers for each kernel size
+        for i, ks in enumerate(self.kernel_size):
+            # Calculate number of 3x3 layers needed to approximate the receptive field
+            # of the original kernel size
+            if ks <= 3:
+                num_layers = 1
+            elif ks <= 5:
+                num_layers = 2
+            elif ks <= 7:
+                num_layers = 3
+            else:
+                # For larger kernels, use more 3x3 layers
+                num_layers = max(3, (ks + 1) // 3)
+            
+            # Build VGG-style block
+            layers = []
+            current_channels = channels_in
+            
+            for j in range(num_layers):
+                if j == num_layers - 1:
+                    # Last layer outputs the desired number of channels
+                    out_ch = channels_out
+                else:
+                    # Intermediate layers maintain or gradually increase channels
+                    out_ch = min(channels_out, current_channels + 32)
+                
+                layers.extend([
+                    nn.Conv2d(current_channels, out_ch, 3, stride if j == 0 else 1, padding=1),
+                    nn.BatchNorm2d(out_ch, 1e-3),
+                    nn.ReLU(True) if j < num_layers - 1 else nn.Identity()  # No ReLU after last conv
+                ])
+                current_channels = out_ch
+            
+            # Add final ReLU after residual connection
+            vgg_block = nn.Sequential(*layers)
+            setattr(self, f's_{i}', vgg_block)
+            
+            # Residual connection projection if needed
+            if channels_in != channels_out:
+                setattr(self, f'residual_proj_{i}', 
+                       nn.Sequential(
+                           nn.Conv2d(channels_in, channels_out, 1, stride),
+                           nn.BatchNorm2d(channels_out, 1e-3)
+                       ))
+            else:
+                setattr(self, f'residual_proj_{i}', nn.Identity())
+        
+        self.final_relu = nn.ReLU(True)
+    
+    def forward(self, x_pyramid, prj_name=None, MNIST_Scale=None, category=None, x_input=None, save_rdms=None, plt_filters=None):
+        s_maps_per_k = []
+        
+        for k in range(len(self.kernel_size)):
+            s_maps_per_i = []
+            vgg_layer = getattr(self, f's_{k}')
+            residual_proj = getattr(self, f'residual_proj_{k}')
+            
+            for i in range(len(x_pyramid)):
+                x = x_pyramid[i]
+                ori_size = x.shape[2:4]
+                
+                # VGG-style forward pass
+                s_map = vgg_layer(x)
+                
+                # Residual connection
+                if hasattr(self, f'residual_proj_{k}'):
+                    identity = residual_proj(x)
+                    # Ensure same spatial dimensions for residual addition
+                    if s_map.shape[2:] != identity.shape[2:]:
+                        identity = pad_to_size(identity, s_map.shape[2:])
+                    s_map = s_map + identity
+                
+                # Apply final ReLU after residual connection
+                s_map = self.final_relu(s_map)
+                
+                # Pad back to original size
+                s_map = pad_to_size(s_map, ori_size)
+                s_maps_per_i.append(s_map)
+            
+            s_maps_per_k.append(s_maps_per_i)
+        
+        if len(s_maps_per_k) == 1:
+            s_maps = s_maps_per_k[0]
+        else:
+            s_maps = []
+            for i in range(len(x_pyramid)):
+                k_list = [s_maps_per_k[j][i] for j in range(len(s_maps_per_k))]
+                temp_maps = torch.cat(k_list, dim=1)
+                s_maps.append(temp_maps)
+        
+        return s_maps
+
+
+class HMAX_IP_VGG_Residual(nn.Module):
+    """
+    HMAX network based on HMAX_IP_basic_single_band_deeper but with VGG tricks 
+    (3x3 convolutions instead of large kernels) and residual connections
+    """
+    def __init__(self,
+                 ip_scales=18,
+                 s1_scale=13,
+                 s1_la=6.8,
+                 s1_si=5.4,
+                 n_ori=4,
+                 num_classes=1000,
+                 s1_trainable_filters=False,
+                 visualize_mode=False,
+                 prj_name=None,
+                 MNIST_Scale=None,
+                 category=None,
+                 single_scale_bool=True,
+                 ):
+        super(HMAX_IP_VGG_Residual, self).__init__()
+        self.ip_scales = 1
+        self.ip_scale_bands = ip_scales
+        self.single_scale_bool = False
+        self.make_ip_2_bool = False
+        self.argmax_bool = False
+
+        # A few settings
+        self.s1_scale = s1_scale
+        self.s1_la = s1_la
+        self.s1_si = s1_si
+        self.n_ori = n_ori
+        self.num_classes = num_classes
+        self.s1_trainable_filters = s1_trainable_filters
+        self.MNIST_Scale = MNIST_Scale
+        self.category = category
+        self.prj_name = prj_name
+        self.scale = 4
+
+        self.same_scale_viz = None
+        self.base_scale = None
+        self.orcale_bool = None
+        self.save_rdms = []
+        self.plt_filters = []
+
+        self.force_const_size_bool = False
+        self.c1_sp_kernel_sizes = [12, 10]
+
+        print('c1_sp_kernel_sizes : ', self.c1_sp_kernel_sizes)
+    
+        # Setting the scale stride and number of scales pooled at a time
+        self.c_scale_stride = 1
+        self.c_num_scales_pooled = 2
+
+        self.c1_scale_stride = self.c_scale_stride
+        self.c1_num_scales_pooled = self.c_num_scales_pooled
+        
+        # Global pooling (spatially)
+        self.c2b_scale_stride = self.c_scale_stride
+        self.c2b_num_scales_pooled = ip_scales - 1
+
+        # Feature extractors (same S1 and C1 as original)
+        self.s1 = S1(scale=self.s1_scale, n_ori=n_ori, padding='valid', trainable_filters=True,
+                     la=self.s1_la, si=self.s1_si, visualize_mode=visualize_mode, 
+                     prj_name=self.prj_name, MNIST_Scale=self.MNIST_Scale)
+        self.c1 = C(global_pool=False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, 
+                    n_in_sbands=ip_scales, num_scales_pooled=self.c1_num_scales_pooled, 
+                    scale_stride=self.c1_scale_stride, visualize_mode=visualize_mode,
+                    c1_bool=True, prj_name=self.prj_name, MNIST_Scale=self.MNIST_Scale)
+
+        # VGG-style layers with residual connections
+        self.s2b_before_1 = S2_VGG_Residual(channels_in=n_ori, channels_out=128, kernel_size=3, stride=1)
+        self.s2b_before_2 = S2_VGG_Residual(channels_in=128, channels_out=128, kernel_size=3, stride=1)
+        self.s2b_before_3 = S2_VGG_Residual(channels_in=128, channels_out=128, kernel_size=3, stride=1)
+
+        # Multi-scale VGG-style layer (replaces large kernels with multiple 3x3)
+        self.s2b = S2_VGG_Residual(channels_in=128, channels_out=128, kernel_size=[4, 8, 12, 16], stride=1, s2b_bool=True)
+        self.c2b = C(global_pool=True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+                     num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, 
+                     c2b_bool=True, prj_name=self.prj_name)
+    
+        # Classifier with deeper architecture and residual-like connections
+        self.classifier = nn.Sequential(
+            nn.Linear(self.get_s4_in_channels(), 512),
+            nn.ReLU(True),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.ReLU(True),
+            nn.Dropout(0.2),
+            nn.Linear(256, num_classes)
+        )
+
+    def get_s4_in_channels(self):
+        c2b_out = len(self.s2b.kernel_size) * 128  # channels_out = 128
+        s4_in = c2b_out
+        return s4_in
+
+    def make_ip(self, x, same_scale_viz=None, base_scale=None, ip_scales=None, scale=None):
+        # Same implementation as original
+        if ip_scales and scale:
+            ip_scales = ip_scales
+            scale = scale
+            const_size_bool = True or self.force_const_size_bool
+        else:
+            ip_scales = self.ip_scales
+            scale = self.scale
+            const_size_bool = False or self.force_const_size_bool
+
+        base_image_size = int(x.shape[-1]) 
+        
+        if ip_scales == 1:
+            image_scales_down = [base_image_size]
+            image_scales_up = []
+        elif ip_scales == 2:
+            image_scales_up = []
+            image_scales_down = [np.ceil(base_image_size/(2**(1/scale))), base_image_size]
+        else:
+            image_scales_down = [np.ceil(base_image_size/(2**(i/scale))) for i in range(int(np.ceil(ip_scales/2)))]
+            image_scales_up = [np.ceil(base_image_size*(2**(i/scale))) for i in range(1, int(np.ceil(ip_scales/2)))]
+        
+        image_scales = image_scales_down + image_scales_up
+        index_sort = np.argsort(image_scales)
+        index_sort = index_sort[::-1]
+        self.image_scales = [image_scales[i_s] for i_s in index_sort]
+
+        if const_size_bool:
+            base_image_size = 112
+        else:
+            base_image_size = int(x.shape[-1]) 
+
+        if len(self.image_scales) > 1:
+            image_pyramid = []
+            for i_s in self.image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size=(i_s, i_s), mode='bilinear').clamp(min=0, max=1)
+
+                if const_size_bool:
+                    if i_s <= base_image_size:
+                        interpolated_img = pad_to_size(interpolated_img, (base_image_size, base_image_size))
+                    elif i_s > base_image_size:
+                        center_crop = torchvision.transforms.CenterCrop(base_image_size)
+                        interpolated_img = center_crop(interpolated_img)
+                
+                image_pyramid.append(interpolated_img)
+
+            return image_pyramid
+        else:
+            if self.orcale_bool:
+                if x.shape[-1] > 224:
+                    center_crop = torchvision.transforms.CenterCrop(224)
+                    x = center_crop(x)
+                elif x.shape[-1] < 224:
+                    x = pad_to_size(x, (224, 224))
+            return [x]
+
+    def make_ip_2(self, x, same_scale_viz=None, base_scale=None, scale=None):
+        # Same implementation as original
+        base_image_size = int(x.shape[-1]) 
+
+        if scale > 1:
+            image_scales_up = [np.ceil(base_image_size*scale), base_image_size]
+            image_scales_down = []
+        else:
+            image_scales_up = []
+            image_scales_down = [base_image_size, np.ceil(base_image_size/scale)]
+
+        image_scales = image_scales_down + image_scales_up
+        index_sort = np.argsort(image_scales)
+        index_sort = index_sort[::-1]
+        self.image_scales = [image_scales[i_s] for i_s in index_sort]
+
+        if len(self.image_scales) > 1:
+            image_pyramid = []
+            for i_s in self.image_scales:
+                i_s = int(i_s)
+                interpolated_img = F.interpolate(x, size=(i_s, i_s), mode='bilinear').clamp(min=0, max=1)
+                image_pyramid.append(interpolated_img)
+            return image_pyramid
+
+    def forward(self, x, batch_idx=None, contrastive_scale_loss=False, contrastive_2_bool=False, ip_scales=None, scale=None):
+        if x.shape[1] == 3:
+            x = x[:, 0:1]
+
+        correct_scale_loss = 0
+
+        # Image pyramid generation
+        if not self.make_ip_2_bool:
+            x_pyramid = self.make_ip(x, same_scale_viz=self.same_scale_viz, base_scale=self.base_scale, 
+                                   ip_scales=ip_scales, scale=scale)
+        else:
+            x_pyramid = self.make_ip_2(x, same_scale_viz=self.same_scale_viz, base_scale=self.base_scale)
+
+        # S1 and C1 layers (same as original)
+        s1_maps = self.s1(x_pyramid, self.MNIST_Scale, batch_idx, prj_name=self.prj_name, 
+                         category=self.category, save_rdms=self.save_rdms, plt_filters=self.plt_filters)
+        c1_maps = self.c1(s1_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, 
+                         same_scale_viz=self.same_scale_viz, base_scale=self.base_scale, 
+                         c1_sp_kernel_sizes=self.c1_sp_kernel_sizes, image_scales=self.image_scales, 
+                         save_rdms=self.save_rdms, plt_filters=self.plt_filters)
+
+        # VGG-style layers with residual connections
+        s2b_bef_maps_1 = self.s2b_before_1(c1_maps, MNIST_Scale=self.MNIST_Scale, prj_name=self.prj_name, 
+                                          category=self.category, x_input=x_pyramid, save_rdms=self.save_rdms, 
+                                          plt_filters=self.plt_filters)
+        s2b_bef_maps_2 = self.s2b_before_2(s2b_bef_maps_1, MNIST_Scale=self.MNIST_Scale, prj_name=self.prj_name, 
+                                          category=self.category, x_input=x_pyramid, save_rdms=self.save_rdms, 
+                                          plt_filters=self.plt_filters)
+        s2b_bef_maps_3 = self.s2b_before_3(s2b_bef_maps_2, MNIST_Scale=self.MNIST_Scale, prj_name=self.prj_name, 
+                                          category=self.category, x_input=x_pyramid, save_rdms=self.save_rdms, 
+                                          plt_filters=self.plt_filters)
+
+        # Multi-scale VGG-style processing
+        s2b_maps = self.s2b(s2b_bef_maps_3, MNIST_Scale=self.MNIST_Scale, prj_name=self.prj_name, 
+                           category=self.category, x_input=x_pyramid, save_rdms=self.save_rdms, 
+                           plt_filters=self.plt_filters)
+        c2b_maps, c2b_scale_maps, max_scale_index, correct_scale_loss = self.c2b(
+            s2b_maps, x_pyramid, self.MNIST_Scale, batch_idx, self.category, self.prj_name, 
+            same_scale_viz=self.same_scale_viz, base_scale=self.base_scale, image_scales=self.image_scales, 
+            save_rdms=self.save_rdms, plt_filters=self.plt_filters, scale_loss=False, argmax_bool=self.argmax_bool)
+
+        # Classification
+        c2b_maps_flatten = torch.flatten(c2b_maps[0], 1)
+
+        if contrastive_2_bool:
+            output = c2b_maps_flatten
+        else:
+            output = self.classifier(c2b_maps_flatten)
+
+        if contrastive_2_bool:
+            return output, c2b_scale_maps, max_scale_index, correct_scale_loss
+        else:
+            return output, c2b_maps[0].squeeze(), max_scale_index, correct_scale_loss
+
+
+
 
 #########################################################################################################
 class HMAX_2_streams(nn.Module):
@@ -1153,6 +1541,64 @@ def hmax_old_deep(pretrained=False, **kwargs):
         model.scale = 2
 
         model.model_pre.ip_scales = 18
+        model.stream_2_bool = False
+        
+    return model
+
+
+@register_model
+def hmax_new_tricks(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 4
+    n_classes=10
+    visualize_mode = False 
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    backbone = HMAX_IP_VGG_Residual(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes, visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
+    model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+    
+    if pretrained:
+        model.model_pre.base_scale = 224
+        ip_scales = 18
+        model.ip_scales = ip_scales
+        model.scale = 2
+
+        model.model_pre.ip_scales = ip_scales
+        model.stream_2_bool = False
+        
+    return model
+        
+
+@register_model
+def hmax_old_s1_c_scoring(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 4
+    n_classes=10
+    visualize_mode = False 
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    backbone = HMAX_IP_basic_single_band_deeper(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes, visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale, use_c_scoring2_optimized = True)
+    model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+    
+    if pretrained:
+        model.model_pre.base_scale = 224
+        ip_scales = 18
+        model.ip_scales = ip_scales
+        model.scale = 2
+
+        model.model_pre.ip_scales = ip_scales
         model.stream_2_bool = False
         
     return model
