@@ -19,6 +19,8 @@ from tqdm import tqdm
 
 from timm.models import create_model, load_checkpoint, is_model, list_models
 
+from timm.models.HMAX_old import hmax_old_original
+
 
 class FeatureExtractor(nn.Module):
     def __init__(self, model, layers):
@@ -260,7 +262,7 @@ class Korean():
         accs = self.get_accuracy(filepaths)
         print(accs)
         return accs
-    
+
 
 def load_chresmax_v3():
     kwargs = {
@@ -308,6 +310,28 @@ def load_chresmax_abs_bypass_only(layername=None):
     return model, 'chresmax_abs_bypass_only', layername, layers
 
 
+def load_old_hmax():
+    checkpoint_path = "/oscar/data/tserre/npant1/pytorch-output/train/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = hmax_old_original().to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    model.model_pre.base_scale = 224
+    ip_scales = 18
+    model.ip_scales = ip_scales
+    model.scale = 2
+    model.model_pre.ip_scales = ip_scales
+    model.stream_2_bool = False
+    
+    # print(vars(model))
+    
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers]
+    print(layers)
+    
+    return model, "hmax_old_original", None, None
+
+
 def load_chmax(layername=None):
     kwargs = {
         'ip_scale_bands': 18,
@@ -319,13 +343,18 @@ def load_chmax(layername=None):
     # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
     model = create_model(
         'hmax_old',
-        pretrained="/oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt",
+        pretrained="/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
         num_classes=10,
         in_chans=3,
         global_pool=None,
         scriptable=False,
         **kwargs
     )
+    
+    # Set the critical attributes that your friend identified
+    model.model_pre.base_scale = 224
+    model.model_pre.ip_scales = 18
+    
     layers = dict([*model.named_modules()]).keys()
     # filter layers
     layers = [layer for layer in layers]
@@ -380,7 +409,9 @@ def load_chresmax_v3_bypass_only(layername=None):
     return model, 'chresmax_v3_bypass_only', layername, layers
 
 def load_models(modelname, layername=None):
-    if modelname == 'hmax_old':
+    if modelname == 'hmax_old_original':
+        return load_old_hmax()
+    elif modelname == 'hmax_old':
         return load_chmax(layername)
     elif modelname == 'chresmax_v3_bypass_only':
         return load_chresmax_v3_bypass_only(layername)
@@ -410,8 +441,8 @@ def test_loaded_model(model):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Hangul character evaluation for a single model layer.")
-    parser.add_argument('--model_name', type=str, required=True, choices=['hmax_old', 'chresmax_v3_bypass_only', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
-    parser.add_argument('--layer_name', type=str, required=True, help='The specific layer to evaluate.')
+    parser.add_argument('--model_name', type=str, choices=['hmax_old_original', 'hmax_old', 'chresmax_v3_bypass_only', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
+    parser.add_argument('--layer_name', type=str, help='The specific layer to evaluate.')
     
     args = parser.parse_args()
     
@@ -424,8 +455,11 @@ if __name__ == "__main__":
     # model, modelname, layername, all_layers = load_chresmax_v3_bypass_only("")
     # model, modelname, layername, all_layers = load_chresmax_abs_bypass_only("")
     # model, modelname, layername, all_layers = load_hmax_new_tricks("")
+    
     model, modelname, _, _ = load_models(args.model_name)
     
+    test_loaded_model(model)
+
     model = model.to(device)
     
     try:
@@ -442,7 +476,4 @@ if __name__ == "__main__":
         with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
             f.write(f"Error running Korean experiment for layer {layer_to_process}: {e}\n")
                 
-    # 20: {('13', '13'): np.float64(0.509962962962966), ('13', '52'): np.float64(0.470888888888893), ('52', '13'): np.float64(0.4803888888888914), ('13', '130'): np.float64(0.511314814814815), ('130', '13'): np.float64(0.5477777777777786)}
-    # 41: {('13', '13'): np.float64(0.51666666666667), ('13', '52'): np.float64(0.48720370370370647), ('52', '13'): np.float64(0.5038333333333351), ('13', '130'): np.float64(0.5233518518518488), ('130', '13'): np.float64(0.5800370370370412)}
-    # 50: {('13', '13'): np.float64(0.5181111111111145), ('13', '52'): np.float64(0.4972037037037045), ('52', '13'): np.float64(0.5116296296296325), ('13', '130'): np.float64(0.5281481481481427), ('130', '13'): np.float64(0.5915925925925996)}
-    # 54: {('13', '13'): np.float64(0.518518518518522), ('13', '52'): np.float64(0.5), ('52', '13'): np.float64(0.518518518518522), ('13', '130'): np.float64(0.5370370370370258), ('130', '13'): np.float64(0.5925925925926)
+

@@ -1454,11 +1454,11 @@ class HMAX_2_streams(nn.Module):
             stream_1_output, stram_1_c2b_feats, max_scale_index, _ = self.model_pre(x_rescaled, batch_idx, ip_scales = self.stream_2_ip_scales, scale = self.stream_2_scale)
             
         else:
-            # print('Hereeeeeeeee')
+            print('Hereeeeeeeee')
             stream_1_output, stram_1_c2b_feats, max_scale_index, _ = self.model_pre(x, batch_idx) #, ip_scales = 2, scale = 4)
 
         if self.stream_2_bool and self.training: #if not eval mode
-            # print('Wrongggggg')
+            print('Wrongggggg')
             scale_factor_list = [0.707, 0.841, 1, 1.189, 1.414]
             # scale_factor_list = [0.841, 1, 1.189]
             scale_factor = random.choice(scale_factor_list)
@@ -1515,6 +1515,28 @@ def hmax_old(pretrained=False, **kwargs):
         model.model_pre.ip_scales = ip_scales
         model.stream_2_bool = False
         
+    return model
+
+
+@register_model
+def hmax_old_original(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 4
+    n_classes=10
+    visualize_mode = False
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    backbone = HMAX_IP_basic_single_band_deeper(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes,
+                                visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
+    model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+    if pretrained:
+        raise NotImplementedError
     return model
 
 

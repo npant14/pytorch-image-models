@@ -45,7 +45,7 @@ MODEL_NAME_LIST = ['hmax_old', 'hmax_new_tricks', 'chresmax_v3_bypass_only',
 MODEL_NAME = 'chresmax_v3_bypass_only'
 
 for model_name in MODEL_NAME_LIST:
-    # get_all_acc(model=None, modelname=model_name, layer='', base_filepath=BASE)
+    get_all_acc(model=None, modelname=model_name, layer='', base_filepath=BASE)
     df = pd.read_csv(os.path.join(BASE, model_name, 'all_acc.csv'), index_col=0)
     
     # getting stats
