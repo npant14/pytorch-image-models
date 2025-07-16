@@ -2634,8 +2634,10 @@ class CHRESMAX_V3_bypass_only(nn.Module):
     def forward(self, x):
         """
         Creates two streams (original + random-scaled) for scale-consistency training.
+        During training: returns stream_2_output (scaled/augmented) for backpropagation
+        During evaluation: returns stream_1_output (original) for clean evaluation
         Returns:
-            (output_of_stream1, correct_scale_loss)
+            (output, correct_scale_loss)
         """
         # stream 1 (original scale)
         result = self.model_backbone(x)
@@ -2644,7 +2646,12 @@ class CHRESMAX_V3_bypass_only(nn.Module):
         else:
             stream_1_output, stream_1_c1_feats = result
 
-        # stream 2 (random scale)
+        # If in evaluation mode, return stream 1 output without scale augmentation
+        if not self.training:
+            correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
+            return stream_1_output, correct_scale_loss
+
+        # stream 2 (random scale) - only during training
         scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
         scale_factor = random.choice(scale_factor_list)
         img_hw = x.shape[-1]
@@ -2681,7 +2688,13 @@ class CHRESMAX_V3_bypass_only(nn.Module):
 
         correct_scale_loss = c1_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
 
-        return stream_1_output, correct_scale_loss
+        # Return stream 2 output (scaled/augmented) for training to learn scale invariance
+        return stream_2_output, correct_scale_loss
+
+        # ======================== ORIGINAL CODE (COMMENTED OUT) ========================
+        # # ORIGINAL: Always returned stream_1_output regardless of training/eval mode
+        # return stream_1_output, correct_scale_loss
+        # ============================================================================
 
 class CHRESMAX_V3_bypass_only_tiny(nn.Module):
     """
