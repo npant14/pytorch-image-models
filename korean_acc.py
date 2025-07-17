@@ -40,7 +40,7 @@ def get_all_acc(model='', modelname=None, layer='', base_filepath=None):
     return df
     
 BASE = '/oscar/data/tserre/xyu110/pytorch-output/korean'
-MODEL_NAME_LIST = ['hmax_old', 'hmax_new_tricks', 'chresmax_v3_bypass_only',
+MODEL_NAME_LIST = ['hmax_old_original', 'hmax_old', 'hmax_new_tricks', 'chresmax_v3_bypass_only',
                    'chresmax_abs_bypass_only']
 MODEL_NAME = 'chresmax_v3_bypass_only'
 

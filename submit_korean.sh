@@ -24,7 +24,7 @@ fi
 
 which python
 
-MODEL_TO_RUN="hmax_old_original"
+MODEL_TO_RUN="chresmax_v3_bypass_only"
 JSON_FILE="/users/xyu110/pytorch-image-models/korean/models_and_layers.json"
 
 cd /users/xyu110/pytorch-image-models

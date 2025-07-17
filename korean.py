@@ -395,7 +395,7 @@ def load_chresmax_v3_bypass_only(layername=None):
     }
     model = create_model(
         'chresmax_v3_bypass_only',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar',
+        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist_new/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar',
         num_classes=10,
         in_chans=3,
         global_pool=None,
