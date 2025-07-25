@@ -441,7 +441,7 @@ class S2(nn.Module):
                                                      nn.ReLU(True)
                                                     ))
 
-        # self.batchnorm = nn.BatchNorm2d(channels_out, 1e-3)
+        self.batchnorm = nn.BatchNorm2d(channels_out, 1e-3)
 
 
     def forward(self, x_pyramid, prj_name = None, MNIST_Scale = None, category = None, x_input = None, save_rdms = None, plt_filters = None):
@@ -552,6 +552,9 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         # Feature extractors (in the order of the table in Figure 1)
         self.s1 = S1(scale=self.s1_scale, n_ori=n_ori, padding='valid', trainable_filters = True, #s1_trainable_filters,
                      la=self.s1_la, si=self.s1_si, visualize_mode = visualize_mode, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
+        self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
+                        num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
+                        c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
         
         self.s2b_before_1 = S2(channels_in=n_ori, channels_out=128, kernel_size=3, stride=1)
         self.s2b_before_2 = S2(channels_in=128, channels_out=128, kernel_size=3, stride=1)
@@ -561,22 +564,22 @@ class HMAX_IP_basic_single_band_deeper(nn.Module):
         self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
                      num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
         
-        if not self.use_c_scoring2_optimized:
-            self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
-                        num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
-                        c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
-            self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
-                        num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
-        else:
-            self.c1 = C_scoring2_optimized(
-                num_channels=n_ori,
-                pool_func1=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[0], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[0]))),
-                pool_func2=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[1], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[1]))),
-                skip=self.c1_scale_stride,
-                global_scale_pool=False
-            )
-            self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
-                        num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+        # if not self.use_c_scoring2_optimized:
+        #     self.c1 = C(global_pool = False, sp_kernel_size=self.c1_sp_kernel_sizes, sp_stride_factor=0.5, n_in_sbands=ip_scales,
+        #                 num_scales_pooled=self.c1_num_scales_pooled, scale_stride=self.c1_scale_stride, visualize_mode = visualize_mode, \
+        #                 c1_bool = True, prj_name = self.prj_name, MNIST_Scale = self.MNIST_Scale)
+        #     self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+        #                 num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
+        # else:
+        #     self.c1 = C_scoring2_optimized(
+        #         num_channels=n_ori,
+        #         pool_func1=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[0], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[0]))),
+        #         pool_func2=nn.MaxPool2d(kernel_size=self.c1_sp_kernel_sizes[1], stride=int(np.ceil(0.5 * self.c1_sp_kernel_sizes[1]))),
+        #         skip=self.c1_scale_stride,
+        #         global_scale_pool=False
+        #     )
+        self.c2b = C(global_pool = True, sp_kernel_size=-1, sp_stride_factor=None, n_in_sbands=ip_scales-1,
+                    num_scales_pooled=self.c2b_num_scales_pooled, scale_stride=self.c2b_scale_stride, c2b_bool = True, prj_name = self.prj_name)
             
             # global pooling handles differently, need to set up the pooling functions correctly
             # self.c2b = C_scoring2_optimized(

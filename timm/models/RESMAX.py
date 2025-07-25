@@ -2797,6 +2797,7 @@ class CH_2_streams_training_eval_sep(nn.Module):
                  bypass=True,
                  model_backbone=None,
                  bypass_only_model_bool=False,
+                 stream_1_bool=False,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -2806,6 +2807,7 @@ class CH_2_streams_training_eval_sep(nn.Module):
         
         self.model_backbone.contrastive_loss = contrastive_loss
         self.num_classes = self.model_backbone.num_classes
+        self.stream_1_bool = stream_1_bool
         
         self.print_param_stats(model_backbone)
         
@@ -2830,7 +2832,9 @@ class CH_2_streams_training_eval_sep(nn.Module):
                 stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
 
         # If in evaluation mode, return stream 1 output without scale augmentation
-        if not self.training:
+        # or when set stream_1_bool to True
+        if not self.training or self.stream_1_bool:
+            print("HERRRRRE, Korean exp goes to right place")
             correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
             return stream_1_output, correct_scale_loss
 

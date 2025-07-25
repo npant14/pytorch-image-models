@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
-#SBATCH --time=4:00:00
+#SBATCH --time=2:00:00
 #SBATCH --output=/oscar/data/tserre/xyu110/pytorch-output/korean/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/oscar/data/tserre/xyu110/pytorch-output/korean/slurm_logs/%x_%A_%a.err
 #SBATCH --mail-user=xizheng_yu@brown.edu
