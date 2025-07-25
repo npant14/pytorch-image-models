@@ -50,29 +50,29 @@ mkdir -p $RESULTS_DIR
 results_file="${RESULTS_DIR}/baseline_woaug_${MODEL_PTH_USED}_${PADDING_MODE}.csv"
 
 # Run validation for specified parameters
-# sh distributed_val.sh $GPUS validate.py \
-#     --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
-#     --model $MODEL \
-#     -b $BATCH_SIZE \
-#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE\
-#     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
-#     --input-size $INPUT_SIZE \
-#     --pretrained \
-#     --checkpoint $CHECKPOINT_PATH \
-#     --results-file $results_file \
-#     --workers $CPUS
-
-# MNIST
-results_file="${RESULTS_DIR}/mnist.csv"
 sh distributed_val.sh $GPUS validate.py \
-    --data-dir /oscar/data/tserre/xyu110/mnist \
-    --num-classes 10 \
+    --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
     --model $MODEL \
     -b $BATCH_SIZE \
     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE\
     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
-    --input-size 3 224 224 \
+    --input-size $INPUT_SIZE \
     --pretrained \
     --checkpoint $CHECKPOINT_PATH \
     --results-file $results_file \
     --workers $CPUS
+
+# MNIST
+# results_file="${RESULTS_DIR}/mnist.csv"
+# sh distributed_val.sh $GPUS validate.py \
+#     --data-dir /oscar/data/tserre/xyu110/mnist \
+#     --num-classes 10 \
+#     --model $MODEL \
+#     -b $BATCH_SIZE \
+#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE\
+#     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
+#     --input-size 3 224 224 \
+#     --pretrained \
+#     --checkpoint $CHECKPOINT_PATH \
+#     --results-file $results_file \
+#     --workers $CPUS

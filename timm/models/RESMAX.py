@@ -2805,6 +2805,8 @@ class CH_2_streams_training_eval_sep(nn.Module):
         self.bypass_only_model_bool = bypass_only_model_bool
         
         self.model_backbone.contrastive_loss = contrastive_loss
+        self.num_classes = self.model_backbone.num_classes
+        
         self.print_param_stats(model_backbone)
         
     def forward(self, x):
@@ -2926,6 +2928,8 @@ class CH_2_streams(nn.Module):
         self.pad_color_background = None
         
         self.model_backbone.contrastive_loss = contrastive_loss
+        self.num_classes = self.model_backbone.num_classes
+        
         self.print_param_stats(model_backbone)
         
     def forward(self, x):
