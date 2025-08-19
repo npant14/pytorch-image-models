@@ -61,12 +61,16 @@ class C_scoring2_optimized(nn.Module):
         self.skip = skip
         
         # Learnable resizing layers (with in-place ReLU)
-        self.resizing_layers = nn.Sequential(
-            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_1, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_2, padding=1),
-            nn.ReLU(inplace=True),
-        )
+        if not global_scale_pool:
+            self.resizing_layers = nn.Sequential(
+                nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_1, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(num_channels, num_channels, kernel_size=resize_kernel_2, padding=1),
+                nn.ReLU(inplace=True),
+            )
+        else:
+            # For global scale pooling, we don't need resizing layers
+            self.resizing_layers = None
 
     def forward(self, x_pyramid):
         """
@@ -89,14 +93,16 @@ class C_scoring2_optimized(nn.Module):
 
             # Gather a list of pooled outputs
             out_list = [self.pool1(x) for x in x_pyramid]
+            
+            # import pdb; pdb.set_trace()
 
             # We'll iteratively soft-select from out_list[0] through out_list[-1]
             out_ref = out_list[0]
             final_size = out_list[len(out_list)//2].shape[-2:]  # pick a reference size
 
             for i in range(1, len(out_list)):
-                tmp = F.interpolate(out_list[i], final_size, mode='bilinear', align_corners=False)
-                tmp = self.resizing_layers(tmp)
+                tmp = F.interpolate(out_list[i], size=final_size, mode='bilinear', align_corners=False)
+                # tmp = self.resizing_layers(tmp)
                 
                 # Score each
                 score_out_ref = self.scoring_conv(out_ref)

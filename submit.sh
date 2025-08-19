@@ -94,6 +94,8 @@
 # ./submit_job.sh chresmax_v3_bypass_only_tiny 11 0.5 7776 2 8 True "8:00:00" 0.001 gpu-he 1.0 224
 
 # ./submit_job.sh chresmax_v3_bypass_only 11 0.5 4096 8 4 True "48:00:00" 0.001 gpu 1.0 224
+# ./submit_job.sh chresmax_v3_bypass_only_c2b 11 0.5 4096 8 4 True "24:00:00" 0.001 gpu 1.0 224
+
 # ./submit_job.sh chresmax_v3_bypass_only_1 16 0.5 4096 2 4 True "48:00:00" 0.001 gpu 1.0 224
 # ./submit_job.sh chresmax_abs_bypass_only 16 1 9216 4 8 True "48:00:00" 0.001 gpu-he 1.0 224 
 # ./submit_job.sh chresmax_abs_bypass_only 16 0.5 9216 8 4 True "48:00:00" 0.001 gpu 1.0 224 

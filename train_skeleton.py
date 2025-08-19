@@ -52,6 +52,8 @@ from timm.utils import ApexScaler, NativeScaler
 
 from pad import *
 
+os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+
 
 try:
     from apex import amp

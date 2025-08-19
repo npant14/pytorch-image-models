@@ -180,6 +180,8 @@ class Korean():
         self.data = korean_dataloader(img_size, data_dir)
         # self.data = get_korean_dataloader_arjun(img_size, 1, 1)
         
+        self.feature_index = 0
+        
         os.makedirs(self.outdir, exist_ok=True)
         print("setup Korean experiment -- ready to run")
 
@@ -292,7 +294,7 @@ class Korean():
                 
                 # Handle old hmax structure
                 if type(tensor_feature) is tuple or type(tensor_feature) is list:
-                    tensor_feature = tensor_feature[0][0]
+                    tensor_feature = tensor_feature[self.feature_index][0]
                 
                 # Flatten each feature vector and move to CPU
                 flattened = torch.flatten(tensor_feature, start_dim=1)
@@ -440,7 +442,7 @@ class Korean():
                             best_accuracy = acc
                             best_threshold = thresh
                     
-                    print(f"best threshold : {best_threshold}")
+                    # print(f"best threshold : {best_threshold}")
                     # print(f"best accuracy : {best_accuracy}")
 
                     test_correctly_above_threshold = sum(i > best_threshold for i in correct + test_correct)
@@ -593,8 +595,8 @@ def load_hmax_old_original():
             new_state_dict[key] = value
     
     # model = model.to(device).eval()
-    model = model.to(device)
     model.load_state_dict(new_state_dict, strict=True)
+    model = model.to(device)
     
     model.model_pre.base_scale = 224
     ip_scales = 18
@@ -754,6 +756,11 @@ def load_hmax_new_tricks(layername=None):
         scriptable=False,
         **kwargs
     )
+    # load the state dict
+    checkpoint = torch.load("/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_new_tricks_gpu_8_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar", map_location='cpu')
+    state_dict = checkpoint['state_dict']
+    model.load_state_dict(state_dict, strict=True)
+    
     layers = dict([*model.named_modules()]).keys()
     # filter layers
     layers = [layer for layer in layers]
@@ -778,11 +785,38 @@ def load_chresmax_v3_bypass_only(layername=None):
         **kwargs
     )
     model.stream_1_bool = True
+    model.load_state_dict(torch.load('/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist_new/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar', map_location='cpu')['state_dict'], strict=True)
     layers = dict([*model.named_modules()]).keys()
     # filter layers
     layers = [layer for layer in layers]
     print(layers)
     return model, 'chresmax_v3_bypass_only', layername, layers
+
+def load_chresmax_v3_bypass_only_c2b(layername=None):
+    kwargs = {
+        'ip_scale_bands': 11,
+        'classifier_input_size': 4096,
+        'bypass': True,
+        'c_debug': False,
+    }
+    model = create_model(
+        'chresmax_v3_bypass_only_c2b',
+        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_11_chresmax_v3_bypass_only_c2b_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass_1/model_best.pth.tar',
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    model.load_state_dict(torch.load('/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_11_chresmax_v3_bypass_only_c2b_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass_1/model_best.pth.tar', map_location='cpu')['state_dict'], strict=True)
+    model.stream_1_bool = True
+    layers = dict([*model.named_modules()]).keys()
+    # filter layers
+    layers = [layer for layer in layers]
+    print(layers)
+    return model, 'chresmax_v3_bypass_only_c2b', layername, layers
+
+
 
 def load_models(modelname, layername=None):
     if modelname == 'hmax_old_original':
@@ -794,10 +828,15 @@ def load_models(modelname, layername=None):
     elif modelname == 'hmax_old':
         return load_chmax(layername)
     elif modelname == 'chresmax_v3_bypass_only':
+        # python korean.py --model_name chresmax_v3_bypass_only --layer_name model_backbone.s2b
         return load_chresmax_v3_bypass_only(layername)
+    elif modelname == 'chresmax_v3_bypass_only_c2b':
+        # python korean.py --model_name chresmax_v3_bypass_only_c2b --layer_name model_backbone.c2b
+        return load_chresmax_v3_bypass_only_c2b(layername)
     elif modelname == 'chresmax_abs_bypass_only':
         return load_chresmax_abs_bypass_only(layername)
     elif modelname == 'hmax_new_tricks':
+        # python korean.py --model_name hmax_new_tricks --layer_name model_pre.c2b
         return load_hmax_new_tricks(layername)
     else:
         raise ValueError(f"Unknown model name: {modelname}")
@@ -805,9 +844,10 @@ def load_models(modelname, layername=None):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Hangul character evaluation for a single model layer.")
-    parser.add_argument('--model_name', type=str, default="hmax_old_original", choices=['hmax_old_arjun', 'hmax_old_original', 'hmax_old', 'chresmax_v3_bypass_only', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
+    parser.add_argument('--model_name', type=str, default="hmax_old_original", choices=['hmax_old_arjun', 'hmax_old_original', 'hmax_old', 'chresmax_v3_bypass_only', 'chresmax_v3_bypass_only_c2b', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
     parser.add_argument('--layer_name', type=str, default="model_pre.c2b", help='The specific layer to evaluate.')
-    
+    parser.add_argument('--run_s2b_all_layers', action='store_true', help='Run the evaluation for all layers in the S2B model.')
+
     args = parser.parse_args()
     
     
@@ -822,20 +862,56 @@ if __name__ == "__main__":
     
     model, modelname, _, _ = load_models(args.model_name)
     model = model.to(device)
-    print(vars(model))
+    # print(vars(model))
     print(f"Loaded model: {modelname} with layer: {layer_to_process}")
-    try:
-        korean = Korean(model,
-                        os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
-                        device,
-                        '/gpfs/data/tserre/npant1/hangul_data',
-                        224,
-                        layer_to_process)
-        korean.run()
-    except Exception as e:
-        print(f"Error running Korean experiment for layer {layer_to_process}: {e}")
-        # write error to txt file
-        with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
-            f.write(f"Error running Korean experiment for layer {layer_to_process}: {e}\n")
-                
+    
+    korean = Korean(model,
+                os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+                device,
+                '/gpfs/data/tserre/npant1/hangul_data',
+                224,
+                layer_to_process)
+    
+    
+    if args.run_s2b_all_layers:
+        
+        all_results = []
+        
+        for index in range(11):
+            korean.feature_index = index
+            accs = korean.run()
+            
+            all_results.append([layer_to_process, index, accs])
+        
+        # Write all results to CSV
+        with open("./test.csv", 'a') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['layer', 'index', 'accs'])
+            writer.writerows(all_results)
+            
+        from collections import defaultdict
+        values_by_key = defaultdict(list)
+
+        for data_dict in [result[2] for result in all_results]:
+            for key, value in data_dict.items():
+                values_by_key[key].append(value)
+        
+        accs = {key: np.max(value_list) for key, value_list in values_by_key.items()}
+        
+    else:
+        
+        try:
+            accs = korean.run()
+            
+            
+        except Exception as e:
+            print(f"Error running Korean experiment for layer {layer_to_process}: {e}")
+            # write error to txt file
+            with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
+                f.write(f"Error running Korean experiment for layer {layer_to_process}: {e}\n")
+    
+    # write results
+    with open(os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', f"results.csv"), 'a') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([modelname, layer_to_process, accs])
 
