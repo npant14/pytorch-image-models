@@ -20,9 +20,6 @@ import pytorch_lightning as pl
 
 from timm.models import create_model, load_checkpoint, is_model, list_models
 
-from timm.models.HMAX_old import hmax_old_original
-import hmax_fixed_ligtning
-
 
 class FeatureExtractor(nn.Module):
     def __init__(self, model, layers):
@@ -77,97 +74,7 @@ class korean_dataloader():
     def __len__(self):
         return len(self.data)
     
-# from torch.utils.data import random_split, DataLoader, Dataset
-# class dataa_loader_korean(pl.LightningDataModule):
-#     def __init__(self, image_size, traindir, valdir, testdir, batch_size_per_gpu, n_gpus, test_mode = False, \
-#                  rdm_corr_mode = False, featur_viz = False, same_scale_viz = False, linderberg_bool = False, \
-#                  linderberg_dir = None, linderberg_test = False, orginal_mnist_bool = False):
-#         super().__init__()
-          
-#         # Directory to load Data
-#         self.traindir = traindir
-#         self.valdir = valdir
-#         self.testdir = testdir
-#         self.test_mode = test_mode
-#         self.rdm_corr_mode = rdm_corr_mode
-#         self.featur_viz = featur_viz
-#         self.same_scale_viz = same_scale_viz
 
-#         self.image_size = int(image_size)
-
-#     def __getitem__(self, idx):
-
-#         img = self.train_data[idx]
-
-#         return img
- 
-#     def __len__(self):
-#         return len(self.train_data)
-    
-#     def setup(self, stage=None):
-
-#             self.train_data = datasets.ImageFolder(root=
-#                 self.traindir,
-#                 transform=
-#                 transforms.Compose([
-#                     transforms.ToTensor(),
-#                     Invert(),
-#                     transforms.ToPILImage(),
-#                     transforms.Resize((40,40)),
-#                     transforms.Pad(((self.image_size - 40)//2, (self.image_size - 40)//2)),
-#                     transforms.ToTensor(),
-#                 ]))
-
-#             self.val_data = datasets.ImageFolder(root=
-#                 self.valdir,
-#                 transform=
-#                 transforms.Compose([
-#                     transforms.Resize((self.image_size, self.image_size)),
-#                     transforms.Pad(50),
-#                     #transforms.RandomHorizontalFlip(),
-#                     transforms.ToTensor(),
-#                 ]))
-
-#             if self.test_mode:
-#                 self.test_data = datasets.ImageFolder(root=
-#                     self.testdir,
-#                     transform =
-#                     transforms.Compose([
-#                     transforms.Resize((self.image_size, self.image_size)),
-#                         transforms.ToTensor(),
-#                     ]), 
-#                     # loader = loader_func 
-#                     )
-
-
-#     def train_dataloader(self):
-        
-#         # Generating train_dataloader
-#         loader = DataLoader(self.train_data, 
-#                           batch_size = self.batch_size, drop_last = True, num_workers = 8, pin_memory=False, shuffle = True)
-#         return loader
-  
-#     def val_dataloader(self):
-        
-#         # Generating val_dataloader
-#         return DataLoader(self.val_data,
-#                           batch_size = self.batch_size, drop_last = True, num_workers = 8, pin_memory=False, shuffle = True)
-  
-#     def test_dataloader(self):
-        
-#         # Generating test_dataloader
-#         return DataLoader(self.test_data,
-#                           batch_size = self.batch_size, drop_last = True, num_workers = 4, shuffle = False)
-
-# def get_korean_dataloader_arjun(image_size, batch_size_per_gpu, n_gpus):
-#     traindir = "/gpfs/data/tserre/npant1/hangul_data"
-#     valdir = "/gpfs/data/tserre/npant1/hangul_data"
-#     testdir = "/gpfs/data/tserre/npant1/hangul_data"
-
-#     data = dataa_loader_korean(image_size, traindir, valdir, testdir, batch_size_per_gpu, n_gpus)
-#     data.setup()
-
-#     return data
 
 class Korean():
     def __init__(self, model, outdir, device, data_dir, img_size=322, layer = "s3.layer.3.conv3"):
@@ -532,183 +439,6 @@ class Korean():
         return accs
 
 
-def load_chresmax_v3():
-    kwargs = {
-        'ip_scale_bands': 11,
-        'classifier_input_size': 10496,
-        'bypass': True,
-        'c_debug': False,
-    }
-    model = create_model(
-        'chresmax_v3',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/mnist/ip_11_chresmax_v3_gpu_2_cl_0.1_ip_3_224_224_10496_c1[_6,3,1_]_bypass_3/checkpoint-10.pth.tar',
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers if "s3" in layer and "conv" in layer]
-    print(layers)
-    return model
-
-
-def load_chresmax_abs_bypass_only(layername=None):
-    kwargs = {
-        'ip_scale_bands': 16,
-        'classifier_input_size': 9216,
-        'bypass': True,
-        'c_debug': False,
-    }
-    model = create_model(
-        'chresmax_abs_bypass_only',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_16_chresmax_abs_bypass_only_gpu_8_cl_0.1_ip_3_224_224_9216_c1[_6,3,1_]_bypass',
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
-    print(layers)
-    return model, 'chresmax_abs_bypass_only', layername, layers
-
-
-def load_hmax_old_original():
-    # checkpoint_path = "/oscar/data/tserre/npant1/pytorch-output/train/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar"
-    model = hmax_old_original()
-    checkpoint_path = "/oscar/data/tserre/xyu110/hmax_image_scales/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt"
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # Remove "HMAX." prefix from all keys in the state_dict
-    state_dict = checkpoint['state_dict']
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        if key.startswith('HMAX.'):
-            new_key = key[5:]  # Remove "HMAX." prefix (5 characters)
-            new_state_dict[new_key] = value
-        else:
-            new_state_dict[key] = value
-    
-    # model = model.to(device).eval()
-    model.load_state_dict(new_state_dict, strict=True)
-    model = model.to(device)
-    
-    model.model_pre.base_scale = 224
-    ip_scales = 18
-    model.ip_scales = ip_scales
-    model.scale = 2
-    model.model_pre.ip_scales = ip_scales
-    model.stream_2_bool = False
-    
-    
-    
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
-    print(layers)
-    
-    return model, "hmax_old_original", None, None
-
-
-def load_hmax_arjun():
-    prj_name = "korean"
-    n_ori = 4
-    n_classes = 54 ## 54 characters
-    lr = 1e-4
-    weight_decay = 1e-4
-    batch_size_per_gpu = 1
-    num_epochs = 1 ## only 1 for few shot learning
-    ip_scales = 18
-    image_size = 224
-
-    IP_bool = True
-    IP_bool_recon = False
-    IP_full_bool = False
-    capsnet_bool = False
-    IP_capsnet_bool = False
-    IP_contrastive_bool = False
-    lindeberg_fov_max_bool = False
-
-    linderberg_bool = False
-    my_data = True
-    all_scales_train_bool = False
-    orginal_mnist_bool = False
-
-    oracle_bool = False
-    argmax_bool = False
-
-    oracle_plot_overlap_bool = False
-    argmax_plot_overlap_bool = False
-    oracle_argmax_plot_overlap_bool = False
-
-    IP_bool = True
-    IP_2_streams = False
-    contrastive_2_bool = False
-    sim_clr_bool = False
-
-    IP_bool = False
-    IP_2_streams = True
-    ip_scales = 18
-
-    # Mode
-    test_mode = True
-    val_mode = False
-    continue_tr = False
-    visualize_mode = False
-    rdm_corr = False
-    rdm_thomas = False
-    featur_viz = False
-    same_scale_viz = False
-    cifar_data_bool = False
-
-    scale_datasets = [18,36,8,24,30,12,4,20,16]
-    train_dataset = 24
-
-    MNIST_Scale = train_dataset
-    
-    # Initialize the model first
-    model = hmax_fixed_ligtning.HMAX_trainer(prj_name, n_ori, 10, lr, weight_decay, ip_scales, IP_bool, visualize_mode, \
-                                                    MNIST_Scale, capsnet_bool = capsnet_bool, IP_capsnet_bool = IP_capsnet_bool, \
-                                                    IP_contrastive_bool = IP_contrastive_bool, lindeberg_fov_max_bool = lindeberg_fov_max_bool, \
-                                                    IP_full_bool = IP_full_bool, IP_bool_recon = IP_bool_recon, IP_contrastive_finetune_bool = False, \
-                                                    contrastive_2_bool = True, sim_clr_bool = True, batch_size = 32, \
-                                                    IP_2_streams = IP_2_streams, cifar_data_bool = cifar_data_bool)
-    
-    # Load the model weights from regular PyTorch checkpoint
-    checkpoint = torch.load('/oscar/data/tserre/xyu110/hmax_image_scales/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt', map_location='cpu')
-    
-    # # Fix the key names to match the current model structure
-    state_dict = checkpoint['state_dict']
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        if key.startswith('model_pre.'):
-            # Add 'HMAX.' prefix to match the current model structure
-            new_key = 'HMAX.' + key
-            new_state_dict[new_key] = value
-        else:
-            new_state_dict[key] = value
-    
-    model.load_state_dict(new_state_dict)
-    
-    # Alternative PyTorch Lightning checkpoint loading (commented out)
-    # model = hmax_fixed_ligtning.HMAX_trainer.load_from_checkpoint('./HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt')  
-    
-    model.HMAX.base_scale = image_size
-    model.ip_scales = ip_scales
-    model.HMAX.ip_scales = ip_scales
-    model.HMAX.scale = 2
-
-    if IP_2_streams:
-        model.HMAX.model_pre.ip_scales = ip_scales
-        model.HMAX.stream_2_bool = False
-
-    return model, "hmax_old_arjun", None, None
-
 def load_chmax(layername=None):
     kwargs = {
         'ip_scale_bands': 18,
@@ -738,35 +468,6 @@ def load_chmax(layername=None):
     print(layers)
     return model, "hmax_old", layername, layers
 
-def load_hmax_new_tricks(layername=None):
-    kwargs = {
-        'ip_scale_bands': 18,
-        'classifier_input_size': 4096,
-        'bypass': True,
-        'c_debug': False,
-    }
-    # "/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
-    # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
-    model = create_model(
-        'hmax_new_tricks',
-        pretrained="/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_new_tricks_gpu_8_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    # load the state dict
-    checkpoint = torch.load("/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_new_tricks_gpu_8_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar", map_location='cpu')
-    state_dict = checkpoint['state_dict']
-    model.load_state_dict(state_dict, strict=True)
-    
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
-    print(layers)
-    return model, "hmax_new_tricks", layername, layers
-
 
 def load_chresmax_v3_bypass_only(layername=None):
     kwargs = {
@@ -792,52 +493,14 @@ def load_chresmax_v3_bypass_only(layername=None):
     print(layers)
     return model, 'chresmax_v3_bypass_only', layername, layers
 
-def load_chresmax_v3_bypass_only_c2b(layername=None):
-    kwargs = {
-        'ip_scale_bands': 11,
-        'classifier_input_size': 4096,
-        'bypass': True,
-        'c_debug': False,
-    }
-    model = create_model(
-        'chresmax_v3_bypass_only_c2b',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_11_chresmax_v3_bypass_only_c2b_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass_1/model_best.pth.tar',
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    model.load_state_dict(torch.load('/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_11_chresmax_v3_bypass_only_c2b_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass_1/model_best.pth.tar', map_location='cpu')['state_dict'], strict=True)
-    model.stream_1_bool = True
-    layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
-    print(layers)
-    return model, 'chresmax_v3_bypass_only_c2b', layername, layers
-
 
 
 def load_models(modelname, layername=None):
-    if modelname == 'hmax_old_original':
-        # python korean.py --model_name hmax_old_original --layer_name model_pre.c2b
-        return load_hmax_old_original()
-    elif modelname == "hmax_old_arjun":
-        # python korean.py --model_name hmax_old_arjun --layer_name HMAX.model_pre.c2b
-        return load_hmax_arjun()
-    elif modelname == 'hmax_old':
+    if modelname == 'hmax_old':
         return load_chmax(layername)
     elif modelname == 'chresmax_v3_bypass_only':
         # python korean.py --model_name chresmax_v3_bypass_only --layer_name model_backbone.s2b
         return load_chresmax_v3_bypass_only(layername)
-    elif modelname == 'chresmax_v3_bypass_only_c2b':
-        # python korean.py --model_name chresmax_v3_bypass_only_c2b --layer_name model_backbone.c2b
-        return load_chresmax_v3_bypass_only_c2b(layername)
-    elif modelname == 'chresmax_abs_bypass_only':
-        return load_chresmax_abs_bypass_only(layername)
-    elif modelname == 'hmax_new_tricks':
-        # python korean.py --model_name hmax_new_tricks --layer_name model_pre.c2b
-        return load_hmax_new_tricks(layername)
     else:
         raise ValueError(f"Unknown model name: {modelname}")
 
@@ -855,10 +518,6 @@ if __name__ == "__main__":
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # model, modelname, layername, all_layers = load_chmax("")
-    # model, modelname, layername, all_layers = load_chresmax_v3_bypass_only("")
-    # model, modelname, layername, all_layers = load_chresmax_abs_bypass_only("")
-    # model, modelname, layername, all_layers = load_hmax_new_tricks("")
     
     model, modelname, _, _ = load_models(args.model_name)
     model = model.to(device)

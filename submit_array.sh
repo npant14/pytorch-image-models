@@ -9,8 +9,8 @@
 #SBATCH --mem=48G
 #SBATCH --time=12:00:00
 #SBATCH --array=0-6
-#SBATCH --output=/oscar/data/tserre/xyu110/pytorch-output/%x_%A_%a.out
-#SBATCH --error=/oscar/data/tserre/xyu110/pytorch-output/%x_%A_%a.err
+#SBATCH --output=/users/xyu110/pytorch-image-models/%x_%A_%a.out
+#SBATCH --error=/users/xyu110/pytorch-image-models/%x_%A_%a.err
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -37,4 +37,4 @@ echo "Running evaluation for model: $model"
 echo "Array task ID: $SLURM_ARRAY_TASK_ID"
 
 # Run the evaluation for this specific model
-python evaluate_hmax_pasupathy1.py --model $model
+python evaluate_hmax_pasupathy.py --model $model
