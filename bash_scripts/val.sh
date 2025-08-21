@@ -31,7 +31,7 @@ for imgscale in 160
 do
     for IP_BANDS in 3
     do
-        sh distributed_val.sh $GPUS validate.py \
+        sh bash_scripts/distributed_val.sh $GPUS validate.py \
             --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
             --model $MODEL \
             -b $BATCH_SIZE \

@@ -50,7 +50,7 @@ mkdir -p $RESULTS_DIR
 results_file="${RESULTS_DIR}/baseline_woaug_${MODEL_PTH_USED}_${PADDING_MODE}.csv"
 
 # Run validation for specified parameters
-sh distributed_val.sh $GPUS validate.py \
+sh bash_scripts/distributed_val.sh $GPUS validate.py \
     --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
     --model $MODEL \
     -b $BATCH_SIZE \

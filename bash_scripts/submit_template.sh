@@ -63,47 +63,21 @@ done
 
 echo "Using experiment name: ${EXPERIMENT_NAME}"
 
-# TORCH_DISTRIBUTED_DEBUG=INFO sh distributed_train.sh $GPUS train_skeleton.py \
-#     --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
-#     --dataset $DATASET \
-#     --model $MODEL \
-#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
-#     --cl-lambda $CL_LAMBDA \
-#     --opt sgd \
-#     -b $BATCH_SIZE \
-#     --epochs 90 \
-#     --lr $LR \
-#     --weight-decay 5e-4 \
-#     --sched step \
-#     --momentum 0.9 \
-#     --lr-cycle-decay 0.1 \
-#     --decay-epochs 30 \
-#     --warmup-epochs 0 \
-#     --hflip 0.5 \
-#     --scale $IMAGE_SCALE 1.0 \
-#     --train-crop-mode rrc \
-#     --input-size $INPUT_SIZE \
-#     --experiment $EXPERIMENT_NAME \
-#     --output $OUTPUT_DIR \
-#     --workers $WORKERS \
-
-
-# MNIST
-TORCH_DISTRIBUTED_DEBUG=DETAIL sh distributed_train.sh $GPUS train_skeleton.py \
-    --data-dir /oscar/data/tserre/xyu110/mnist \
-    --num-classes 10 \
+TORCH_DISTRIBUTED_DEBUG=INFO sh bash_scripts/distributed_train.sh $GPUS train_skeleton.py \
+    --data-dir /gpfs/data/tserre/npant1/ILSVRC/ \
+    --dataset $DATASET \
     --model $MODEL \
     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
     --cl-lambda $CL_LAMBDA \
     --opt sgd \
     -b $BATCH_SIZE \
-    --epochs 15 \
-    --decay-epochs 5 \
+    --epochs 90 \
     --lr $LR \
     --weight-decay 5e-4 \
     --sched step \
     --momentum 0.9 \
     --lr-cycle-decay 0.1 \
+    --decay-epochs 30 \
     --warmup-epochs 0 \
     --hflip 0.5 \
     --scale $IMAGE_SCALE 1.0 \
@@ -111,7 +85,33 @@ TORCH_DISTRIBUTED_DEBUG=DETAIL sh distributed_train.sh $GPUS train_skeleton.py \
     --input-size $INPUT_SIZE \
     --experiment $EXPERIMENT_NAME \
     --output $OUTPUT_DIR \
-    --workers $WORKERS 
+    --workers $WORKERS \
+
+
+# MNIST
+# TORCH_DISTRIBUTED_DEBUG=DETAIL sh distributed_train.sh $GPUS train_skeleton.py \
+#     --data-dir /oscar/data/tserre/xyu110/mnist \
+#     --num-classes 10 \
+#     --model $MODEL \
+#     --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE bypass=$BYPASS\
+#     --cl-lambda $CL_LAMBDA \
+#     --opt sgd \
+#     -b $BATCH_SIZE \
+#     --epochs 15 \
+#     --decay-epochs 5 \
+#     --lr $LR \
+#     --weight-decay 5e-4 \
+#     --sched step \
+#     --momentum 0.9 \
+#     --lr-cycle-decay 0.1 \
+#     --warmup-epochs 0 \
+#     --hflip 0.5 \
+#     --scale $IMAGE_SCALE 1.0 \
+#     --train-crop-mode rrc \
+#     --input-size $INPUT_SIZE \
+#     --experiment $EXPERIMENT_NAME \
+#     --output $OUTPUT_DIR \
+#     --workers $WORKERS 
 
 # resnet 18
 # sh distributed_train.sh $GPUS train_skeleton.py \

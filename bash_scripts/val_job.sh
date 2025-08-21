@@ -59,7 +59,7 @@ for image_scale in "${scales[@]}"; do
 
     # Create temporary job script in the subdirectory
     temp_script="val_scripts/${val_job_name}.sh"
-    cp val_template.sh $temp_script
+    cp bash_scripts/val_template.sh $temp_script
 
     if [ "${partition}" = "gpu" ]; then
     sed -i "/#SBATCH --partition/a #SBATCH --account=carney-tserre-condo" $temp_script

@@ -4,7 +4,6 @@ import numpy as np
 from typing import Iterator
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
-import torchvision.utils as vutils
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
 

@@ -19,9 +19,6 @@ from tqdm import tqdm
 from collections import OrderedDict
 from contextlib import suppress
 from functools import partial
-import matplotlib.pyplot as plt
-import torchvision.utils as vutils
-import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -34,8 +31,7 @@ from timm.models import create_model, load_checkpoint, is_model, list_models
 from timm.utils import accuracy, AverageMeter, natural_key, setup_default_logging, set_jit_fuser, \
     decay_batch_step, check_batch_size_retry, ParseKwargs, reparameterize_model
 
-from pad import *
-# from brainscore_benchmark import Brainscore_Experiment
+from utils_hmax import *
 
 try:
     from apex import amp
@@ -610,23 +606,6 @@ def write_results(results_file, results, format='csv'):
                     dw.writerow(r)
             
             cf.flush()
-
-
-# def write_results(results_file, results, format='csv'):
-#     with open(results_file, mode='w') as cf:
-#         if format == 'json':
-#             json.dump(results, cf, indent=4)
-#         else:
-#             if not isinstance(results, (list, tuple)):
-#                 results = [results]
-#             if not results:
-#                 return
-#             dw = csv.DictWriter(cf, fieldnames=results[0].keys())
-#             dw.writeheader()
-#             for r in results:
-#                 dw.writerow(r)
-#             cf.flush()
-
 
 
 if __name__ == '__main__':

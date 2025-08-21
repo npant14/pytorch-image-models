@@ -13,13 +13,10 @@ import os
 import csv
 import random
 import argparse
-import statistics
 from tqdm import tqdm
-import pytorch_lightning as pl
+ 
 
-
-from timm.models import create_model, load_checkpoint, is_model, list_models
-
+from timm.models import create_model
 
 class FeatureExtractor(nn.Module):
     def __init__(self, model, layers):

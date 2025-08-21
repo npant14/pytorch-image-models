@@ -28,7 +28,7 @@ mkdir -p job_scripts
 
 # Create temporary job script in the subdirectory
 temp_script="job_scripts/job_${job_name}.sh"
-cp submit_template.sh $temp_script
+cp bash_scripts/submit_template.sh $temp_script
 
 cpu_per_gpu=1
 mem_per_gpu=8

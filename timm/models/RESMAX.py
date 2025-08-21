@@ -20,7 +20,6 @@ from ._builder import build_model_with_cfg
 from ._manipulate import checkpoint_seq
 from ._registry import register_model, generate_default_cfgs
 from .ALEXMAX import C_scoring, C
-from .ALEXMAX3 import C_scoring2
 from .ALEXMAX3_optimized import C_scoring2_optimized, C_scoring2_optimized_debug
 from .HMAX import get_ip_scales
 
