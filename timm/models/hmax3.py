@@ -1,6 +1,5 @@
 """
 HMAX3 Model Implementation
-An implementation of the HMAX3 model extracted from RESMAX.py
 """
 
 import torch
@@ -11,6 +10,7 @@ import torchvision
 import numpy as np
 import random
 
+from ._registry import register_model
 
 def pad_to_size(a, size, mode='constant'):
     """Pad tensor to specified size."""
@@ -336,24 +336,20 @@ class S2b_Res(nn.Module):
         return bypass
 
 
-class RESMAX_V2_2(nn.Module):
+class Resmax(nn.Module):
     """
-    RESMAX V2.2 - Smartly choose band in bypass using C score.
-    This is the backbone model used by HMAX3.
+    Resmax, the backbone model used by HMAX3.
     """
     def __init__(self, num_classes=1000, in_chans=3, ip_scale_bands=1,
                  classifier_input_size=18432, contrastive_loss=False,
                  bypass=False, 
                  **kwargs):
-        """
-        smartly choose band in bypass use c score
-        """
         self.num_classes = num_classes
         self.in_chans = in_chans
         self.contrastive_loss = contrastive_loss
         self.ip_scale_bands = ip_scale_bands
         self.bypass = bypass
-        super(RESMAX_V2_2, self).__init__()
+        super(Resmax, self).__init__()
 
         self.s1 = nn.Sequential(
             Residual(3, 48, strides=2),
@@ -409,7 +405,7 @@ class RESMAX_V2_2(nn.Module):
         )
         
         
-        if self.ip_scale_bands > 4:
+        if self.ip_scale_bands > 2:
             self.global_pool = C_scoring2_optimized(
                 num_channels=256,
                 pool_func1=nn.MaxPool2d(kernel_size=3, stride=2),
@@ -417,7 +413,7 @@ class RESMAX_V2_2(nn.Module):
                 resize_kernel_1=3,
                 resize_kernel_2=1,
                 skip=2,
-                global_scale_pool=False
+                global_scale_pool=True
             )
         else:
             self.global_pool = C(global_scale_pool=True)
@@ -436,7 +432,6 @@ class RESMAX_V2_2(nn.Module):
             nn.Linear(4096, num_classes)
         )
 
-        self.print_param_stats()
 
     def make_ip(self, x, num_scale_bands):
         """
@@ -457,7 +452,7 @@ class RESMAX_V2_2(nn.Module):
         else:
             return [x]
 
-    def forward(self, x, pyramid=False):
+    def forward(self, x):
         def apply(module, x):
             return [module(xi) for xi in x] if isinstance(x, list) else module(x)
         
@@ -624,7 +619,7 @@ class CH_2_streams_training_eval_sep(nn.Module):
             print(f"{name:30s} | {count:10,d} | {count/total_params*100:9.1f}%")
         print(f"{'Total':30s} | {total_params:10,d} | {100:9.1f}%")
 
-
+@register_model
 def hmax3(pretrained=False, **kwargs):
     """
     Creates a HMAX3 model instance.
@@ -645,8 +640,8 @@ def hmax3(pretrained=False, **kwargs):
     for key, val in kwargs.items():
         print(key, val)
 
-    # Create the backbone model (RESMAX_V2_2)
-    model_backbone = RESMAX_V2_2(contrastive_loss=True, **kwargs)
+    # Create the backbone model (Resmax)
+    model_backbone = Resmax(contrastive_loss=True, **kwargs)
     
     # Wrap it with the 2-stream training/evaluation wrapper
     model = CH_2_streams_training_eval_sep(

@@ -1461,7 +1461,7 @@ class HMAX_2_streams(nn.Module):
             stream_1_output, stram_1_c2b_feats, max_scale_index, _ = self.model_pre(x, batch_idx) #, ip_scales = 2, scale = 4)
 
         if self.stream_2_bool and self.training: #if not eval mode
-            print('Wrongggggg')
+            # print('Wrongggggg')
             scale_factor_list = [0.707, 0.841, 1, 1.189, 1.414]
             # scale_factor_list = [0.841, 1, 1.189]
             scale_factor = random.choice(scale_factor_list)
@@ -1538,6 +1538,47 @@ def hmax_old_original(pretrained=False, **kwargs):
     backbone = HMAX_IP_basic_single_band_deeper(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes,
                                 visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
     model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+    if pretrained:
+        raise NotImplementedError
+    return model
+
+@register_model
+def hmax_2_5(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 4
+    visualize_mode = False
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    n_classes = kwargs.get('num_classes', 1000)
+    backbone = HMAX_IP_basic_single_band_deeper(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes,
+                                visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
+    model = HMAX_2_streams(num_classes=n_classes, prj_name = prj_name, model_pre = backbone)
+    if pretrained:
+        raise NotImplementedError
+    return model
+
+@register_model
+def hmax_2_1(pretrained=False, **kwargs):
+    try:
+        del kwargs["pretrained_cfg"]
+        del kwargs["pretrained_cfg_overlay"]
+        del kwargs["drop_rate"]
+    except:
+        pass
+    ip_scales = 18
+    n_ori = 4
+    visualize_mode = False
+    prj_name = "This isn't being used"
+    MNIST_Scale = 24
+    n_classes = kwargs.get('num_classes', 1000)
+    model = HMAX_IP_basic_single_band_deeper(ip_scales = ip_scales, n_ori=n_ori,num_classes=n_classes,
+                                visualize_mode = visualize_mode, prj_name = prj_name, MNIST_Scale = MNIST_Scale)
     if pretrained:
         raise NotImplementedError
     return model

@@ -21,6 +21,10 @@ IMAGE_SCALE_LIST="160 192 227 270 322 382 454"
 # ./bash_scripts/submit_job.sh chresmax_v3_2 3 0.1 18432 8 16 True "192:00:00" 0.01 gpu 0.08 322
 # ./bash_scripts/submit_job.sh chresmax_v3_2_abs 3 0.1 18432 8 16 True "192:00:00" 0.01 gpu 0.08 322
 
+# ./bash_scripts/submit_job.sh hmax3 3 0.1 18432 8 16 True "192:00:00" 0.01 gpu
+# ./bash_scripts/submit_job.sh hmax_2_5 18 0.5 0000 8 16 True "192:00:00" 0.01 gpu
+
+
 # ./bash_scripts/val_job.sh chresmax_v3_2 3 0.1 18432 1 128 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass"
 # ./bash_scripts/val_job.sh chresmax_v3_2_abs 3 0.1 18432 1 64 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_chresmax_v3_2_abs_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass" 
 

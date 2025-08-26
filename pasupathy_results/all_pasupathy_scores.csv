@@ -1,3 +1,4 @@
+model,layer,score
 RESNET18-NO_AUG,conv1,1.4286
 RESNET18-AUG,conv1,0.2143
 ALEXNET-AUG,features.0,0.9286
