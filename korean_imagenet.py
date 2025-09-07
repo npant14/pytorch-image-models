@@ -14,9 +14,12 @@ import csv
 import random
 import argparse
 from tqdm import tqdm
- 
 
 from timm.models import create_model
+
+from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2
+from timm.models.alexnet import alexnet
+from timm.models.resnet import resnet18
 
 class FeatureExtractor(nn.Module):
     def __init__(self, model, layers):
@@ -460,113 +463,235 @@ def load_chmax(layername=None):
     model.model_pre.ip_scales = 18
     
     layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
-    print(layers)
     return model, "hmax_old", layername, layers
 
 
-def load_chresmax_v3_bypass_only(layername=None):
-    kwargs = {
-        'ip_scale_bands': 11,
-        'classifier_input_size': 4096,
-        'bypass': True,
-        'c_debug': False,
-    }
-    model = create_model(
-        'chresmax_v3_bypass_only',
-        pretrained='/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist_new/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar',
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    model.stream_1_bool = True
-    model.load_state_dict(torch.load('/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist_new/ip_11_chresmax_v3_bypass_only_gpu_8_cl_0.5_ip_3_224_224_4096_c1[_6,3,1_]_bypass/model_best.pth.tar', map_location='cpu')['state_dict'], strict=True)
+def load_chresmax_v3_2(layername=None):
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = chresmax_v3_2(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
+                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
+                 bypass=True, main_route=False,validation=True,
+                 c_scoring='v2'      
+    ).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
     layers = dict([*model.named_modules()]).keys()
-    # filter layers
-    layers = [layer for layer in layers]
     print(layers)
-    return model, 'chresmax_v3_bypass_only', layername, layers
+    return model, 'chresmax_v3_2', layername, layers
+
+def load_chresmax_v3_2_abs(layername=None):
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_abs_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = chresmax_v3_2_abs(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
+                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
+                 bypass=True, main_route=False,validation=True,
+                 c_scoring='v2'      
+    ).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
+    return model, 'chresmax_v3_2_abs', layername, layers
+
+
+def load_alexnet(layername=None):
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = alexnet(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
+    return model, 'alexnet', layername, layers
+
+
+def load_resnet18(layername=None):
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = resnet18(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
+    return model, 'resnet18', layername, layers
+
 
 
 def load_models(modelname, layername=None):
     if modelname == 'hmax_old':
         return load_chmax(layername)
-    elif modelname == 'chresmax_v3_bypass_only':
-        # python korean.py --model_name chresmax_v3_bypass_only --layer_name model_backbone.s2b
-        return load_chresmax_v3_bypass_only(layername)
+    elif modelname == 'chresmax_v3_2':
+        # python korean_imagenet.py --model_name chresmax_v3_2 --layer_name model_backbone.s2b --run_all_layers
+        return load_chresmax_v3_2(layername)
+    elif modelname == 'chresmax_v3_abs':
+        return load_chresmax_v3_2_abs(layername)
+    elif modelname == 'alexnet':
+        # python korean_imagenet.py --model_name alexnet --layer_name features.0 --run_all_layers
+        return load_alexnet(layername)
+    elif modelname == 'resnet18':
+        # python korean_imagenet.py --model_name resnet18 --layer_name layer1.0.conv1 --run_all_layers
+        return load_resnet18(layername)
     else:
         raise ValueError(f"Unknown model name: {modelname}")
 
     
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Hangul character evaluation for a single model layer.")
-    parser.add_argument('--model_name', type=str, default="hmax_old_original", choices=['hmax_old_arjun', 'hmax_old_original', 'hmax_old', 'chresmax_v3_bypass_only', 'chresmax_v3_bypass_only_c2b', 'chresmax_abs_bypass_only', 'hmax_new_tricks'], help='The name of the model to load.')
-    parser.add_argument('--layer_name', type=str, default="model_pre.c2b", help='The specific layer to evaluate.')
-    parser.add_argument('--run_s2b_all_layers', action='store_true', help='Run the evaluation for all layers in the S2B model.')
+def run_s2b_all_layers_experiment(model, modelname, target_layer, device):
+    """Run Korean experiment for a single layer with multiple feature indices."""
+    print(f"Running S2B all layers experiment for layer: {target_layer}")
+    
+    korean_experiment = Korean(
+        model,
+        os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+        device,
+        '/gpfs/data/tserre/npant1/hangul_data',
+        322,
+        target_layer
+    )
+    
+    layer_results = []
+    
+    # Test 3 different feature indices for this layer
+    for feature_idx in range(3):
+        korean_experiment.feature_index = feature_idx
+        accuracies = korean_experiment.run()
+        layer_results.append([target_layer, feature_idx, accuracies])
+        print(f"Completed feature index {feature_idx}: {accuracies}")
+    
+    # Save results to CSV
+    output_file = "./test_imagenet.csv"
+    with open(output_file, 'a') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['layer', 'index', 'accs'])
+        writer.writerows(layer_results)
+    
+    # Find best accuracy across all feature indices
+    from collections import defaultdict
+    accuracies_by_size_pair = defaultdict(list)
+    
+    for _, _, accuracy_dict in layer_results:
+        for size_pair, accuracy in accuracy_dict.items():
+            accuracies_by_size_pair[size_pair].append(accuracy)
+    
+    best_accuracies = {
+        size_pair: np.max(accuracy_list) 
+        for size_pair, accuracy_list in accuracies_by_size_pair.items()
+    }
+    
+    return best_accuracies
 
-    args = parser.parse_args()
-    
-    
-    layer_to_process = args.layer_name
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def run_all_layers_experiment(model, modelname, all_layer_names, device):
+    """Run Korean experiment for all layers in the model."""
+    print(f"Running experiment for all {len(all_layer_names)} layers")
     
-    model, modelname, _, _ = load_models(args.model_name)
-    model = model.to(device)
-    # print(vars(model))
-    print(f"Loaded model: {modelname} with layer: {layer_to_process}")
+    experiment_results = []
     
-    korean = Korean(model,
+    for current_layer in all_layer_names:
+        try:
+            korean_experiment = Korean(
+                model,
                 os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
                 device,
                 '/gpfs/data/tserre/npant1/hangul_data',
-                224,
-                layer_to_process)
-    
-    
-    if args.run_s2b_all_layers:
-        
-        all_results = []
-        
-        for index in range(11):
-            korean.feature_index = index
-            accs = korean.run()
+                322,
+                current_layer
+            )
             
-            all_results.append([layer_to_process, index, accs])
-        
-        # Write all results to CSV
-        with open("./test.csv", 'a') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['layer', 'index', 'accs'])
-            writer.writerows(all_results)
-            
-        from collections import defaultdict
-        values_by_key = defaultdict(list)
-
-        for data_dict in [result[2] for result in all_results]:
-            for key, value in data_dict.items():
-                values_by_key[key].append(value)
-        
-        accs = {key: np.max(value_list) for key, value_list in values_by_key.items()}
-        
-    else:
-        
-        try:
-            accs = korean.run()
-            
+            layer_accuracies = korean_experiment.run()
+            experiment_results.append([current_layer, layer_accuracies])
+            print(f"Completed layer {current_layer}: {layer_accuracies}")
             
         except Exception as e:
-            print(f"Error running Korean experiment for layer {layer_to_process}: {e}")
-            # write error to txt file
-            with open(os.path.join(korean.outdir, 'error_log.txt'), 'a') as f:
-                f.write(f"Error running Korean experiment for layer {layer_to_process}: {e}\n")
+            print(f"Error running Korean experiment for layer {current_layer}: {e}")
+            # Store default error result to maintain data structure
+            default_error_result = {
+                ('13', '13'): 0.0, ('13', '52'): 0.0, ('13', '130'): 0.0,
+                ('52', '13'): 0.0, ('130', '13'): 0.0,
+            }
+            experiment_results.append([current_layer, default_error_result])
     
-    # write results
-    with open(os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', f"results.csv"), 'a') as csvfile:
+    # Save all results to CSV
+    output_file = f"./{modelname}_all_layers.csv"
+    with open(output_file, 'a') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['layer', 'accuracies'])
+        writer.writerows(experiment_results)
+    
+    print(f"All layer results saved to {output_file}")
+    return experiment_results
+
+
+def run_single_layer_experiment(model, modelname, target_layer, device):
+    """Run Korean experiment for a single specified layer."""
+    print(f"Running single layer experiment for: {target_layer}")
+    
+    try:
+        korean_experiment = Korean(
+            model,
+            os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+            device,
+            '/gpfs/data/tserre/npant1/hangul_data',
+            322,
+            target_layer
+        )
+        
+        accuracies = korean_experiment.run()
+        print(f"Single layer results: {accuracies}")
+        return accuracies
+        
+    except Exception as e:
+        print(f"Error running Korean experiment for layer {target_layer}: {e}")
+        
+        # Log error to file if possible
+        try:
+            error_log_path = os.path.join(korean_experiment.outdir, 'error_log.txt')
+            with open(error_log_path, 'a') as f:
+                f.write(f"Error running Korean experiment for layer {target_layer}: {e}\n")
+        except:
+            print("Could not write error log file")
+        
+        return None
+
+
+if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Run Hangul character evaluation for model layers.")
+    parser.add_argument('--model_name', type=str, default="hmax_old", 
+                       choices=['hmax_old', 'chresmax_v3_2_abs', 'chresmax_v3_2', 'alexnet', 'resnet18'],
+                       help='The name of the model to load.')
+    parser.add_argument('--layer_name', type=str, default="model_pre.c2b",
+                       help='The specific layer to evaluate (for single layer mode).')
+    parser.add_argument('--run_s2b_all_layers', action='store_true',
+                       help='Run evaluation for single layer with multiple feature indices.')
+    parser.add_argument('--run_all_layers', action='store_true',
+                       help='Run evaluation for all layers in the model.')
+
+    args = parser.parse_args()
+    
+    # Setup device and load model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, model_name, _, available_layers = load_models(args.model_name)
+    model = model.to(device)
+    
+    print(f"Loaded model: {model_name}")
+    print(f"Available layers: {len(available_layers)}")
+    
+    # Run the appropriate experiment based on arguments
+    final_results = None
+    
+    if args.run_s2b_all_layers:
+        final_results = run_s2b_all_layers_experiment(model, model_name, args.layer_name, device)
+        
+    elif args.run_all_layers:
+        final_results = run_all_layers_experiment(model, model_name, available_layers, device)
+        
+    else:
+        final_results = run_single_layer_experiment(model, model_name, args.layer_name, device)
+    
+    # Write final results to master results file (only if we have results)
+    if final_results is not None:
+        master_results_path = os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', "results.csv")
+        with open(master_results_path, 'a') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow([modelname, layer_to_process, accs])
+            writer.writerow([model_name, args.layer_name, final_results])
+        print(f"Final results written to {master_results_path}")
+    else:
+        print("No results to write - experiment failed")
 
