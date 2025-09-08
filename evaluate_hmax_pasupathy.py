@@ -156,9 +156,63 @@ def evaluate_model_on_pasupathy(model_name, layer_name=None):
                 )
                 
                 # Run the experiment
-                pasupathy_score = pasupathy_exp.run()
+                pasupathy_result = pasupathy_exp.run()
                 
-                print(f"Pasupathy Score for {model_name}, {layer}: {pasupathy_score}")
+                # Handle the case where the layer was skipped due to unsupported shape
+                if pasupathy_result is None:
+                    print(f"Layer {layer} was skipped due to unsupported tensor shape")
+                    results.append((model_name, layer, "SKIPPED"))
+                    with open(results_file, "a") as f:
+                        f.write(f"{model_name},{layer},SKIPPED\n")
+                    continue
+                
+                # Handle the new return format (tuple with score and neuron populations)
+                if isinstance(pasupathy_result, tuple):
+                    pasupathy_score, neuron_summary = pasupathy_result
+                    print(f"Pasupathy Score for {model_name}, {layer}: {pasupathy_score}")
+                    print(f"Neuron populations data collected for {neuron_summary['total_combinations']} combinations")
+                    print(f"Scales tested: {neuron_summary['scales']}")
+                    
+                    # Save neuron summary data to a separate file
+                    import json
+                    
+                    # Create neuron summaries subfolder
+                    neuron_summaries_dir = os.path.join(OUTPUT_DIR, "neuron_summaries")
+                    os.makedirs(neuron_summaries_dir, exist_ok=True)
+                    
+                    # Clean layer name for filename (replace dots and slashes with underscores)
+                    clean_layer_name = layer.replace('.', '_').replace('/', '_')
+                    neuron_summary_file = os.path.join(neuron_summaries_dir, f"{model_name}_{clean_layer_name}_neuron_summary.json")
+                    
+                    # Convert torch tensors to lists for JSON serialization
+                    json_compatible_summary = {
+                        'model_name': model_name,
+                        'layer': layer,
+                        'final_mean_slope': neuron_summary['final_mean_slope'],
+                        'total_combinations': neuron_summary['total_combinations'],
+                        'scales': neuron_summary['scales'],
+                        'curv_sets': neuron_summary['curv_sets'],
+                        'rotations': neuron_summary['rotations'],
+                        'combinations': []
+                    }
+                    
+                    # Convert tensor data to lists for each combination
+                    for combo in neuron_summary['combinations']:
+                        combo_data = {
+                            'curv_set': combo['curv_set'],
+                            'rotation': combo['rotation'],
+                            'selections': combo['selections'],
+                            'neuron_populations': [pop.detach().cpu().numpy().tolist() for pop in combo['neuron_populations']]
+                        }
+                        json_compatible_summary['combinations'].append(combo_data)
+                    
+                    with open(neuron_summary_file, "w") as f:
+                        json.dump(json_compatible_summary, f, indent=2)
+                    print(f"Neuron summary saved to: {neuron_summary_file}")
+                else:
+                    pasupathy_score = pasupathy_result
+                    print(f"Pasupathy Score for {model_name}, {layer}: {pasupathy_score}")
+                
                 results.append((model_name, layer, pasupathy_score))
                 
                 # Save result to file
@@ -174,6 +228,10 @@ def evaluate_model_on_pasupathy(model_name, layer_name=None):
                 results.append((model_name, layer, "FAILED"))
                 with open(results_file, "a") as f:
                     f.write(f"{model_name},{layer},FAILED\n")
+                # Clean up GPU memory even on error
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
                 continue
         
         return results
