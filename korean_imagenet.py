@@ -16,37 +16,11 @@ import argparse
 from tqdm import tqdm
 
 from timm.models import create_model
-
 from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2
 from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
-
-class FeatureExtractor(nn.Module):
-    def __init__(self, model, layers):
-        super().__init__()
-        self.model = model
-        self.layers = layers
-        self._features = {layer: torch.empty(0) for layer in layers}
-
-        for layer_id in layers:
-            # print(dict([*self.model.named_modules()]).keys())
-            layer = dict([*self.model.named_modules()])[layer_id]
-            layer.register_forward_hook(self.save_outputs_hook(layer_id))
-
-    def save_outputs_hook(self, layer_id):
-        def fn(_, __, output):
-            self._features[layer_id] = output
-        return fn
-
-    def forward(self, x):
-        _ = self.model(x)
-        return self._features
+from utils_hmax import FeatureExtractor, Invert
     
-
-class Invert:
-    def __call__(self, sample):
-        inverted_image = (-1 * sample) + 1
-        return inverted_image
 
 class korean_dataloader():
     def __init__(self, image_size, datadir):
@@ -117,6 +91,21 @@ class Korean():
 
         return new_img
 
+    def compute_dprime(self, correct_correlations, distractor_correlations, threshold):
+        """
+        d' = (proportion correct on target/distractor pairs) - (proportion incorrect on target/target pairs)
+        """
+        # Create binary arrays based on threshold
+        target_distractor_pairs = [1 if i > threshold else 0 for i in correct_correlations]
+        target_target_pairs = [1 if i <= threshold else 0 for i in distractor_correlations]
+        
+        target_distractor_correct = np.mean(target_distractor_pairs)
+        target_target_incorrect = 1.0 - np.mean(target_target_pairs)
+        
+        d_prime = target_distractor_correct - target_target_incorrect
+        
+        return d_prime
+    
     def get_pearson_correlation(self, tensor_1, tensor_2):
         '''
         returns the pearson correlation for a pair of tensors
@@ -283,6 +272,7 @@ class Korean():
 
     def get_accuracy(self, filepaths):
         means = {}
+        d_primes = {}
         errs = {}
         maxes = {}
         # iterate through all the saved csvs
@@ -361,15 +351,21 @@ class Korean():
 
                 print(f"average test accuracy : {sum(collect)/len(collect)}")
                 means[(target_size, test_size)] = sum(collect)/len(collect)
+                
+                # Calculate d-prime
+                d_prime = self.compute_dprime(correct, distractor, best_threshold)
+                d_primes[(target_size, test_size)] = d_prime
+                print(f'd-prime: {d_prime}')
                 # print(f"max test accuracy : {max(collect)}")
                 # maxes[(target_size, test_size)] = max(collect)
                 # print(f"std test accuracy : {statistics.pstdev(collect)}")
                 # errs[(target_size, test_size)] = statistics.pstdev(collect)
                 
-        return means
+        return means, d_primes
     
     def get_accuracy_arjun(self, filepaths):
         means = {}
+        d_primes = {}
         errs = {}
         maxes = {}
         # iterate through all the saved csvs
@@ -422,9 +418,14 @@ class Korean():
 
                 print(f'accuracy: {(correctly_above_threshold + correctly_below_threshold)/(54)}')
 
+                # Calculate d-prime
+                d_prime = self.compute_dprime(correct, distractor, best_threshold)
+                d_primes[(target_size, test_size)] = d_prime
+                print(f'd-prime: {d_prime}')
+
                 means[(target_size, test_size)] = (correctly_above_threshold + correctly_below_threshold)/(54)
             
-        return means
+        return means, d_primes
 
     
     def set_layer(self, layer_name):
@@ -434,9 +435,10 @@ class Korean():
         pairs = [(13, 13), (13, 52), (13, 130)]
         filepaths = [os.path.join(self.outdir, f"{size_1}-{size_2}.csv") for (size_1, size_2) in pairs]
         self.create_correlation_matrices_batched(pairs, self.layer)
-        accs = self.get_accuracy(filepaths)
-        print(accs)
-        return accs
+        accs, d_primes = self.get_accuracy(filepaths)
+        print("Accuracies:", accs)
+        print("D-primes:", d_primes)
+        return accs, d_primes
 
 
 def load_chmax(layername=None):
@@ -518,7 +520,6 @@ def load_models(modelname, layername=None):
     if modelname == 'hmax_old':
         return load_chmax(layername)
     elif modelname == 'chresmax_v3_2':
-        # python korean_imagenet.py --model_name chresmax_v3_2 --layer_name model_backbone.s2b --run_all_layers
         return load_chresmax_v3_2(layername)
     elif modelname == 'chresmax_v3_abs':
         return load_chresmax_v3_2_abs(layername)
@@ -532,51 +533,6 @@ def load_models(modelname, layername=None):
         raise ValueError(f"Unknown model name: {modelname}")
 
     
-def run_s2b_all_layers_experiment(model, modelname, target_layer, device):
-    """Run Korean experiment for a single layer with multiple feature indices."""
-    print(f"Running S2B all layers experiment for layer: {target_layer}")
-    
-    korean_experiment = Korean(
-        model,
-        os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
-        device,
-        '/gpfs/data/tserre/npant1/hangul_data',
-        322,
-        target_layer
-    )
-    
-    layer_results = []
-    
-    # Test 3 different feature indices for this layer
-    for feature_idx in range(3):
-        korean_experiment.feature_index = feature_idx
-        accuracies = korean_experiment.run()
-        layer_results.append([target_layer, feature_idx, accuracies])
-        print(f"Completed feature index {feature_idx}: {accuracies}")
-    
-    # Save results to CSV
-    output_file = "./test_imagenet.csv"
-    with open(output_file, 'a') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['layer', 'index', 'accs'])
-        writer.writerows(layer_results)
-    
-    # Find best accuracy across all feature indices
-    from collections import defaultdict
-    accuracies_by_size_pair = defaultdict(list)
-    
-    for _, _, accuracy_dict in layer_results:
-        for size_pair, accuracy in accuracy_dict.items():
-            accuracies_by_size_pair[size_pair].append(accuracy)
-    
-    best_accuracies = {
-        size_pair: np.max(accuracy_list) 
-        for size_pair, accuracy_list in accuracies_by_size_pair.items()
-    }
-    
-    return best_accuracies
-
-
 def run_all_layers_experiment(model, modelname, all_layer_names, device):
     """Run Korean experiment for all layers in the model."""
     print(f"Running experiment for all {len(all_layer_names)} layers")
@@ -594,9 +550,9 @@ def run_all_layers_experiment(model, modelname, all_layer_names, device):
                 current_layer
             )
             
-            layer_accuracies = korean_experiment.run()
-            experiment_results.append([current_layer, layer_accuracies])
-            print(f"Completed layer {current_layer}: {layer_accuracies}")
+            layer_accuracies, layer_d_primes = korean_experiment.run()
+            experiment_results.append([current_layer, layer_accuracies, layer_d_primes])
+            print(f"Completed layer {current_layer}: accuracies={layer_accuracies}, d_primes={layer_d_primes}")
             
         except Exception as e:
             print(f"Error running Korean experiment for layer {current_layer}: {e}")
@@ -605,13 +561,13 @@ def run_all_layers_experiment(model, modelname, all_layer_names, device):
                 ('13', '13'): 0.0, ('13', '52'): 0.0, ('13', '130'): 0.0,
                 ('52', '13'): 0.0, ('130', '13'): 0.0,
             }
-            experiment_results.append([current_layer, default_error_result])
+            experiment_results.append([current_layer, default_error_result, default_error_result])
     
     # Save all results to CSV
     output_file = f"./{modelname}_all_layers.csv"
     with open(output_file, 'a') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['layer', 'accuracies'])
+        writer.writerow(['layer', 'accuracies', 'd_primes'])
         writer.writerows(experiment_results)
     
     print(f"All layer results saved to {output_file}")
@@ -632,9 +588,10 @@ def run_single_layer_experiment(model, modelname, target_layer, device):
             target_layer
         )
         
-        accuracies = korean_experiment.run()
-        print(f"Single layer results: {accuracies}")
-        return accuracies
+        accuracies, d_primes = korean_experiment.run()
+        print(f"Single layer results - accuracies: {accuracies}")
+        print(f"Single layer results - d_primes: {d_primes}")
+        return {'accuracies': accuracies, 'd_primes': d_primes}
         
     except Exception as e:
         print(f"Error running Korean experiment for layer {target_layer}: {e}")
@@ -658,8 +615,6 @@ if __name__ == "__main__":
                        help='The name of the model to load.')
     parser.add_argument('--layer_name', type=str, default="model_pre.c2b",
                        help='The specific layer to evaluate (for single layer mode).')
-    parser.add_argument('--run_s2b_all_layers', action='store_true',
-                       help='Run evaluation for single layer with multiple feature indices.')
     parser.add_argument('--run_all_layers', action='store_true',
                        help='Run evaluation for all layers in the model.')
 
@@ -676,10 +631,7 @@ if __name__ == "__main__":
     # Run the appropriate experiment based on arguments
     final_results = None
     
-    if args.run_s2b_all_layers:
-        final_results = run_s2b_all_layers_experiment(model, model_name, args.layer_name, device)
-        
-    elif args.run_all_layers:
+    if args.run_all_layers:
         final_results = run_all_layers_experiment(model, model_name, available_layers, device)
         
     else:
@@ -694,4 +646,5 @@ if __name__ == "__main__":
         print(f"Final results written to {master_results_path}")
     else:
         print("No results to write - experiment failed")
+
 

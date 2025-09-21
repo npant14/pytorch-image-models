@@ -2,10 +2,48 @@ import random
 import torch
 import numpy as np
 from typing import Iterator
+import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
+from typing import List, Dict
+
+
+class FeatureExtractor(nn.Module):
+    """Register forward hooks on specified layers and return their outputs.
+
+    Usage:
+        fe = FeatureExtractor(model, ["layer.name"])  # names from model.named_modules()
+        feats = fe(x)  # dict[layer_name] -> tensor output
+    """
+    def __init__(self, model: nn.Module, layers: List[str]):
+        super().__init__()
+        self.model = model
+        self.layers = layers
+        self._features: Dict[str, torch.Tensor] = {layer: torch.empty(0) for layer in layers}
+
+        named = dict([*self.model.named_modules()])
+        for layer_id in layers:
+            if layer_id not in named:
+                raise KeyError(f"Layer '{layer_id}' not found in model.named_modules().")
+            layer = named[layer_id]
+            layer.register_forward_hook(self._save_outputs_hook(layer_id))
+
+    def _save_outputs_hook(self, layer_id):
+        def fn(_, __, output):
+            self._features[layer_id] = output
+        return fn
+
+    def forward(self, x: torch.Tensor):
+        _ = self.model(x)
+        return self._features
+    
+class Invert:
+    def __call__(self, sample):
+        inverted_image = (-1 * sample) + 1
+        return inverted_image
+    
 
 def pad_batch_random(images, target_size):
     """
