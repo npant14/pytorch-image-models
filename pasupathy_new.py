@@ -1,7 +1,7 @@
 """
 runs an evaluation based on data from Pasupathy et. al. 2018(?) 
 """
-from utils_hmax import FeatureExtractor
+from utils_hmax import FeatureExtractor, CenterCropPad
 import torch
 torch.manual_seed(1)
 import numpy as np
@@ -19,30 +19,40 @@ import pickle
 DEFAULT_CURV_SETS = [1, 2]
 DEFAULT_ROTATIONS = list(range(1, 8))  # 1 to 7
 DEFAULT_SCALES = [0.4, 0.6, 0.8, 1.0]
-DEFAULT_IMG_SIZE = 322
+DEFAULT_IMG_SIZE = 322 # TODO: receptive field size 
 DEFAULT_LAYER = "s3.layer.3.conv3"
 DEFAULT_PROGRESS_INTERVAL = 10
 
-def load_images(datadir, curv, rot, size):
+def load_images(datadir, curv, rot, size, rf_size=None):
     """
-    Load images from directory.
+    Load images from directory with optional cropping to receptive field size.
     
     Args:
         datadir: Directory containing images
         curv: Curvature set to load
         rot: Rotation to load
         size: Target image size
+        rf_size: Receptive field size for cropping (optional)
     """
     pattern = re.compile(r"subplot_rot=(\d+)_curv=(\d+)_img=(\d+)\.png")
+    
     # Define transformation to convert images to tensors
     transform = transforms.Compose([
         transforms.Resize(size),
         transforms.ToTensor(),  # Converts image to tensor with shape (C, H, W)
     ])
+    
+    # Set up cropping if needed
+    crop_transform = None
+    if rf_size is not None and rf_size < size:
+        crop_transform = CenterCropPad(output_size=(size, size), crop_size=rf_size, mode='constant')
+    
     # List to store matched images as PyTorch tensors
     image_tensors = []
 
     print(f"Loading images from {datadir} for curv={curv}, rot={rot}")
+    if crop_transform is not None:
+        print(f"Will crop images from center to {rf_size}x{rf_size} (RF size) and pad back to {size}x{size}")
     
     # Loop through all files in the folder
     for filename in os.listdir(datadir):
@@ -57,6 +67,11 @@ def load_images(datadir, curv, rot, size):
                 try:
                     img = Image.open(img_path).convert("RGB")  # Ensure RGB format
                     img_tensor = transform(img)  # Convert to PyTorch tensor
+                    
+                    # Apply cropping if needed
+                    if crop_transform is not None:
+                        img_tensor = crop_transform(img_tensor)
+                    
                     image_tensors.append((img_value, img_tensor))
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
@@ -71,14 +86,21 @@ def load_images(datadir, curv, rot, size):
     return sorted_tensors
 
 class Pasupathy():
-    def __init__(self, model, outdir, device, data_dir, img_size=DEFAULT_IMG_SIZE, layer=DEFAULT_LAYER, 
-                 curv_sets=None, rotations=None, scales=None, progress_interval=DEFAULT_PROGRESS_INTERVAL):
+    def __init__(self, model, outdir, device, data_dir, rf_size,
+                 img_size=DEFAULT_IMG_SIZE,
+                 layer=DEFAULT_LAYER, 
+                 curv_sets=None,
+                 rotations=None,
+                 scales=None,
+                 progress_interval=DEFAULT_PROGRESS_INTERVAL):
+        
         self.model = model
         self.outdir = outdir
         self.device = device
         self.data_dir = data_dir
         self.img_size = img_size
         self.layer = layer
+        self.rf_size = rf_size
         
         # Configurable parameters with sensible defaults
         self.curv_sets = curv_sets if curv_sets is not None else DEFAULT_CURV_SETS
@@ -113,6 +135,45 @@ class Pasupathy():
                 
         return tensor_feature
 
+    def extract_center_activations(self, layer_features, img, layer, neuron_idx=None):
+        """
+        Helper function to extract center activations from a layer for a given image.
+        
+        Args:
+            layer_features: FeatureExtractor instance
+            img: Input image tensor
+            layer: Layer name
+            neuron_idx: Specific neuron index (if None, returns all neurons)
+            
+        Returns:
+            Center activations (single value if neuron_idx specified, tensor if all neurons)
+        """
+        with torch.no_grad():  # Disable gradients to save memory
+            features = layer_features(torch.unsqueeze(img, 0).to(self.device))
+            tensor_feature = self.layer_feature_nested(features, layer)
+            
+            # Handle different tensor shapes for different layer types
+            if len(tensor_feature.shape) == 4:
+                # Convolutional layers: (batch_size, channels, height, width)
+                batch_size, channels, height, width = tensor_feature.shape
+                center_h, center_w = height // 2, width // 2
+                
+                if neuron_idx is not None:
+                    # Return single neuron activation
+                    center_activation = tensor_feature[0, neuron_idx, center_h, center_w].item()
+                else:
+                    # Return all neurons' activations
+                    center_activation = tensor_feature[0, :, center_h, center_w].detach().cpu()
+            else:
+                # Skip layers with unsupported tensor shapes (e.g., 1D, 3D, 5D+)
+                print(f"Warning: Skipping layer '{layer}' with unsupported tensor shape: {tensor_feature.shape}")
+                return None
+            
+            # Clear GPU tensors
+            del tensor_feature, features
+            
+            return center_activation
+
     def find_preferred_orientations(self, model, images, layer, canonical_scale=1.0):
         """
         Find the preferred orientation for each neuron (channel) at the center of the feature map.
@@ -128,10 +189,7 @@ class Pasupathy():
         """
         print(f"Finding preferred orientations at scale {canonical_scale}")
         
-        # Create FeatureExtractor once
         layer_features = FeatureExtractor(model, [layer])
-        
-        # Dictionary to store results for each neuron
         neuron_data = {}
         
         # Process each rotation
@@ -143,39 +201,22 @@ class Pasupathy():
             rot_activities = []
             
             for curv_set in self.curv_sets:
-                # Load images for this curvature set and rotation
-                imgs = load_images(self.data_dir, curv_set, rot, self.img_size)
+                # Load images for this curvature set and rotation with cropping applied
+                imgs = load_images(self.data_dir, curv_set, rot, self.img_size, self.rf_size)
                 
                 for img in imgs:
                     # Resize to canonical scale
-                    size = int(canonical_scale * img.shape[1])
+                    size = int(canonical_scale * self.img_size)  # Scale relative to img_size, not original img size
                     img_resized = self.resize_image(img, size)
                     
-                    # Extract features with memory management
-                    with torch.no_grad():  # Disable gradients to save memory
-                        features = layer_features(torch.unsqueeze(img_resized, 0).to(self.device))
-                        # tensor_feature = features[layer]
-                        tensor_feature = self.layer_feature_nested(features, layer)
-                        
-                        # Handle different tensor shapes for different layer types
-                        if len(tensor_feature.shape) == 4:
-                            # Convolutional layers: (batch_size, channels, height, width)
-                            batch_size, channels, height, width = tensor_feature.shape
-                            center_h, center_w = height // 2, width // 2
-                            center_activations = tensor_feature[0, :, center_h, center_w]  # Shape: (channels,)
-                        else:
-                            # Skip layers with unsupported tensor shapes (e.g., 1D, 3D, 5D+)
-                            print(f"Warning: Skipping layer '{layer}' with unsupported tensor shape: {tensor_feature.shape}")
-                            return None
-                        
-                        # Move to CPU immediately to save GPU memory
-                        center_activations = center_activations.detach().cpu()
-                        
-                        rot_activities.append(center_activations)
-                        
-                        # Clear GPU tensors
-                        del tensor_feature, features
-            
+                    # Extract center activations for all neurons
+                    center_activations = self.extract_center_activations(layer_features, img_resized, layer)
+                    
+                    if center_activations is None:
+                        return None
+                    
+                    rot_activities.append(center_activations)
+
             # Average across all images for this rotation
             if rot_activities:
                 avg_activities = torch.mean(torch.stack(rot_activities), dim=0)  # Shape: (channels,)
@@ -231,9 +272,7 @@ class Pasupathy():
         """
         print("Analyzing scale invariance for each neuron at preferred orientation")
         
-        # Create FeatureExtractor once
         layer_features = FeatureExtractor(model, [layer])
-        
         neuron_scale_analysis = {}
         
         for neuron_idx, pref_data in preferred_orientations.items():
@@ -244,35 +283,19 @@ class Pasupathy():
             scale_activities = []
             
             for curv_set in self.curv_sets:
-                # Load images for this curvature set and preferred rotation
-                imgs = load_images(self.data_dir, curv_set, preferred_rot, self.img_size)
+                # Load images for this curvature set and preferred rotation with cropping applied
+                imgs = load_images(self.data_dir, curv_set, preferred_rot, self.img_size, self.rf_size)
                 
                 for img in imgs:
-                    # Process at different scales
                     for scale in self.scales:
-                        size = int(scale * img.shape[1])
+                        size = int(scale * self.img_size)  # Scale relative to img_size, not original img size
                         img_resized = self.resize_image(img, size)
                         
-                        # Extract features with memory management
-                        with torch.no_grad():  # Disable gradients to save memory
-                            features = layer_features(torch.unsqueeze(img_resized, 0).to(self.device))
-                            # tensor_feature = features[layer]
-                            tensor_feature = self.layer_feature_nested(features, layer)
-
-                            
-                            # Handle different tensor shapes for different layer types
-                            if len(tensor_feature.shape) == 4:
-                                # Convolutional layers: (batch_size, channels, height, width)
-                                batch_size, channels, height, width = tensor_feature.shape
-                                center_h, center_w = height // 2, width // 2
-                                center_activation = tensor_feature[0, neuron_idx, center_h, center_w].item()
-                            else:
-                                # Skip layers with unsupported tensor shapes (e.g., 1D, 3D, 5D+)
-                                print(f"Warning: Skipping layer '{layer}' with unsupported tensor shape: {tensor_feature.shape}")
-                                return None
-                            
-                            # Clear GPU tensors
-                            del tensor_feature, features
+                        # Extract center activation for specific neuron
+                        center_activation = self.extract_center_activations(layer_features, img_resized, layer, neuron_idx)
+                        
+                        if center_activation is None:
+                            return None
                         
                         scale_activities.append({
                             'scale': scale,
@@ -423,14 +446,33 @@ class Pasupathy():
         """
         print("Starting comprehensive neuron analysis...")
         print(f"Configuration: curv_sets={self.curv_sets}, rotations={self.rotations}, scales={self.scales}")
+
+        # TODO: abs value? check paper
         
+        # TODO: only a small subset of neurons showed systematic shifts in their stimulus preferences, as indicated by significant linear regression slopes (N = 13/80; black).
+        
+        # TODO: Percentage across layers
+        
+        # TODO: trend of percentage of neurons that are scale invariant across layers
+        
+        # Step 0: Select neuron: filter activities, calculate orientation
+        print("\n" + "="*60)
+        print("STEP 0: Selecting responsive neurons")
+        print("="*60)
+        included_neurons, rejected_neurons, rejection_reasons = self.select_neurons(self.layer)
+        
+        if not included_neurons:
+            print("No neurons passed the selection criteria. Aborting analysis.")
+            return {}
+
         # Step 1: Find preferred orientations for each neuron
         print("\n" + "="*60)
         print("STEP 1: Finding preferred orientations for each neuron")
         print("="*60)
         
-        # Load sample images to get the layer structure
-        sample_imgs = load_images(self.data_dir, self.curv_sets[0], self.rotations[0], self.img_size)
+        # Load sample images with cropping already applied
+        sample_imgs = load_images(self.data_dir, self.curv_sets[0], self.rotations[0], self.img_size, self.rf_size)
+        
         if not sample_imgs:
             raise ValueError("No images found. Check data directory and parameters.")
         
@@ -438,6 +480,9 @@ class Pasupathy():
             self.model, sample_imgs, self.layer, canonical_scale=1.0
         )
         
+        # Filter preferred_orientations to only include selected neurons
+        preferred_orientations = {k: v for k, v in preferred_orientations.items() if k in included_neurons}
+
         # Step 2: Analyze scale invariance for each neuron at its preferred orientation
         print("\n" + "="*60)
         print("STEP 2: Analyzing scale invariance at preferred orientations")
@@ -459,7 +504,7 @@ class Pasupathy():
         print("\n" + "="*60)
         print("STEP 4: Compiling comprehensive results")
         print("="*60)
-        
+
         comprehensive_results = {
             'experiment_config': {
                 'curv_sets': self.curv_sets,
@@ -468,6 +513,7 @@ class Pasupathy():
                 'layer': self.layer,
                 'img_size': self.img_size
             },
+            'selected_neurons': included_neurons,
             'preferred_orientations': preferred_orientations,
             'neuron_scale_analysis': neuron_scale_analysis,
             'summary_statistics': summary_stats,
@@ -493,7 +539,8 @@ class Pasupathy():
         print(f"\n{'='*60}")
         print("ANALYSIS COMPLETE - SUMMARY")
         print(f"{'='*60}")
-        print(f"Total neurons analyzed: {summary_stats['total_neurons']}")
+        print(f"Total neurons analyzed: {summary_stats['total_neurons']} (selected from a larger pool)")
+        print(f"Neuron selection - Included: {len(included_neurons)}, Rejected: {len(rejected_neurons)}, Reasons: {rejection_reasons}")
         print(f"Mean scale invariance score: {summary_stats['slope_mean']:.4f} ± {summary_stats['slope_std']:.4f}")
         print(f"Median scale invariance score: {summary_stats['slope_median']:.4f}")
         print(f"Mean R-squared: {summary_stats['r_squared_mean']:.4f} ± {summary_stats['r_squared_std']:.4f}")
@@ -611,41 +658,17 @@ class Pasupathy():
             if i % self.progress_interval == 0:  # Progress indicator
                 print(f"Processing image {i+1}/{len(images)}")
                 
-            size = int(scale * img.shape[1]) 
+            size = int(scale * self.img_size)  # Scale relative to img_size, not original img size
             img = self.resize_image(img, size)
             
-            # Process image with memory management
-            with torch.no_grad():  # Disable gradients to save memory
-                features = layer_features(torch.unsqueeze(img, 0).to(self.device))
-                # tensor_feature = features[layer]
-                tensor_feature = self.layer_feature_nested(features, layer)
-
+            # Extract center activations for all neurons
+            center_activations = self.extract_center_activations(layer_features, img, layer)
+            
+            if center_activations is None:
+                return None, None
                 
-                # Handle different tensor shapes for different layer types
-                if len(tensor_feature.shape) == 4:
-                    # Convolutional layers: (batch_size, channels, height, width)
-                    batch_size, channels, height, width = tensor_feature.shape
-                    
-                    # Get center coordinates
-                    center_h = height // 2
-                    center_w = width // 2
-                    
-                    # Extract center RF activations for all channels (neurons)
-                    center_activations = tensor_feature[0, :, center_h, center_w]  # Shape: (channels,)
-                else:
-                    # Skip layers like fc layers, batchnorm...
-                    # Skip layers with unsupported tensor shapes (e.g., 1D, 3D, 5D+)
-                    print(f"Warning: Skipping layer '{layer}' with unsupported tensor shape: {tensor_feature.shape}")
-                    return None, None
-                
-                # Move to CPU immediately to save GPU memory
-                center_activations = center_activations.detach().cpu()
-                
-                # Store the full neuron population response
-                activations.append(center_activations)
-                
-                # Clear GPU tensors
-                del tensor_feature, features
+            # Store the full neuron population response
+            activations.append(center_activations)
 
         # Stack all activations to get shape (num_images, num_channels)
         activations_tensor = torch.stack(activations)  # Shape: (num_images, num_channels)
@@ -676,7 +699,8 @@ class Pasupathy():
                 print(f"Processing combination {current_combination}/{total_combinations}: curv={curv_set}, rot={rot}")
                 print(f"{'='*50}")
                 
-                imgs = load_images(self.data_dir, curv_set, rot, self.img_size)
+                # Load images with RF cropping applied
+                imgs = load_images(self.data_dir, curv_set, rot, self.img_size, self.rf_size)
                 print(f"Loaded {len(imgs)} images")
                 
                 selections = []
@@ -733,3 +757,125 @@ class Pasupathy():
         }
         
         return final_mean, neuron_summary
+
+    def get_baseline_activity(self, layer, num_repeats=5, shift_pixels=2, noise_std=0.05):
+        """
+        Calculate the baseline activity of neurons using low-contrast random noise stimuli with small shifts.
+        """
+        print("Calculating baseline activity with low-contrast random noise...")
+        layer_features = FeatureExtractor(self.model, [layer])
+        baseline_activities = []
+        for _ in range(num_repeats):
+            try:
+                # Generate low-contrast random noise image at full image size
+                # very close to black, and low contrast + little bit noise
+                # TODO: get mean response for different std in response to stimuli
+                noise = torch.clamp(torch.normal(mean=0.5, std=noise_std, size=(3, self.img_size, self.img_size)), 0, 1)
+                
+                # Apply RF cropping if needed (same as other images)
+                if self.rf_size < self.img_size:
+                    crop_transform = CenterCropPad(output_size=(self.img_size, self.img_size), crop_size=self.rf_size, mode='constant')
+                    noise = crop_transform(noise)
+                
+                # Apply a random shift
+                shift_x = np.random.randint(-shift_pixels, shift_pixels + 1)
+                shift_y = np.random.randint(-shift_pixels, shift_pixels + 1)
+                shifted_image = transforms.functional.affine(noise, angle=0, translate=(shift_x, shift_y), scale=1.0, shear=0)
+                
+                # Extract center activations for all neurons
+                center_activations = self.extract_center_activations(layer_features, shifted_image, layer)
+                
+                if center_activations is None:
+                    raise ValueError(f"Unsupported tensor shape for layer {layer}")
+                
+                baseline_activities.append(center_activations)
+                
+            except Exception as e:
+                print(f"Error calculating baseline activity for layer {layer}: {e}")
+                raise e
+
+        if not baseline_activities:
+            return None
+        # Average across repetitions
+        mean_baseline_activity = torch.mean(torch.stack(baseline_activities), dim=0)
+        return mean_baseline_activity
+
+    def get_all_shape_responses(self, layer):
+        """
+        Get responses for all shape stimuli across all conditions.
+        """
+        print("Getting all shape responses...")
+                        
+        layer_features = FeatureExtractor(self.model, [layer])
+        all_responses = []
+
+        total_images = 0
+        for curv_set in self.curv_sets:
+            for rot in self.rotations:
+                # Load images with RF cropping applied
+                imgs = load_images(self.data_dir, curv_set, rot, self.img_size, self.rf_size)
+                total_images += len(imgs)
+                for img in imgs:
+                    try:
+                        # Use full image size for resize (cropping already applied in load_images)
+                        img_resized = self.resize_image(img, self.img_size)
+                        
+                        # Extract center activations for all neurons
+                        center_activations = self.extract_center_activations(layer_features, img_resized, layer)
+                        
+                        all_responses.append(center_activations)
+                        
+                    except Exception as e:
+                        print(f"Error processing image for layer {layer}: {e}")
+                        raise e
+
+        if not all_responses:
+            return None, 0
+            
+        return torch.stack(all_responses), total_images
+
+    def select_neurons(self, layer, min_repeats=5, selectivity_threshold=4):
+        """
+        Selects neurons based on their response properties.
+        """
+        print("Starting neuron selection...")
+                
+        # Step 1: Get all shape responses and check trial count
+        all_responses, num_trials = self.get_all_shape_responses(layer)
+        if all_responses is None:
+            print("Could not get shape responses. Aborting neuron selection.")
+            return None, None, None
+
+        if num_trials < min_repeats:
+            print(f"Insufficient trials ({num_trials}) for all neurons. Minimum required: {min_repeats}.")
+            # Depending on desired behavior, you might want to stop or just warn.
+            # For now, we'll just create empty lists and return.
+            return [], list(range(all_responses.shape[1])), {"insufficient repeats": list(range(all_responses.shape[1]))}
+
+        # Step 2: Calculate baseline firing
+        baseline_rate_per_neuron = self.get_baseline_activity(layer)
+        if baseline_rate_per_neuron is None:
+            print("Could not calculate baseline activity. Aborting neuron selection.")
+            raise ValueError("Failed to calculate baseline activity")
+
+        # Step 3: Find maximum evoked response for each neuron
+        max_response_per_neuron = torch.max(all_responses, dim=0)[0]
+
+        # Step 4: Apply selectivity criterion
+        included_neurons = []
+        rejected_neurons = []
+        rejection_reasons = {"insufficient repeats": [], "weak shape selectivity": []}
+
+        num_neurons = all_responses.shape[1]
+        for neuron_idx in range(num_neurons):
+            max_response = max_response_per_neuron[neuron_idx]
+            baseline_rate = baseline_rate_per_neuron[neuron_idx]
+
+            if max_response < selectivity_threshold * baseline_rate:
+                rejected_neurons.append(neuron_idx)
+                rejection_reasons["weak shape selectivity"].append(neuron_idx)
+            else:
+                included_neurons.append(neuron_idx)
+        
+        print(f"Neuron selection complete. Included: {len(included_neurons)}, Rejected: {len(rejected_neurons)}")
+        return included_neurons, rejected_neurons, rejection_reasons

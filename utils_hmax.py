@@ -10,6 +10,13 @@ from matplotlib import pyplot as plt
 from typing import List, Dict
 
 
+############################## Pasupathy Code ##############################
+
+
+
+
+############################### Korean ##############################
+
 class FeatureExtractor(nn.Module):
     """Register forward hooks on specified layers and return their outputs.
 
@@ -43,6 +50,9 @@ class Invert:
     def __call__(self, sample):
         inverted_image = (-1 * sample) + 1
         return inverted_image
+    
+    
+############################## Training Utils ##############################
     
 
 def pad_batch_random(images, target_size):
@@ -251,6 +261,94 @@ class RandomResizePad:
         return padded_img
     
 
+class RandomCenterResizeCropPad:
+    def __init__(self,
+                 output_size=(227, 227),
+                 scale_choices=[160, 192, 227, 270, 322, 382, 454],
+                 mode='constant'):
+        """
+        Transform that handles different scale invariances.
+        
+        Args:
+            output_size (tuple): The final output size (height, width) that the network expects
+            scale (int): The scale invariance to test
+                        If scale <= min(output_size), the image is resized to scale and center-padded
+                        If scale > min(output_size), the image is resized to scale and center-cropped
+        """
+        self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        self.scale_choices = scale_choices
+        self.mode = mode
+        
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor): Image tensor of shape (C, H, W)
+        Returns:
+            Tensor: Transformed image tensor of shape (C, output_size[0], output_size[1])
+        """
+        scale = random.choice(self.scale_choices)
+
+        # Get original image dimensions
+        _, orig_h, orig_w = img.shape
+        
+        # Calculate aspect ratio
+        aspect_ratio = orig_w / orig_h
+        
+        # Determine new height and width based on scale while maintaining aspect ratio
+        # Set the smaller dimension to scale
+        if aspect_ratio > 1:  # Width > Height (scale applies to height)
+            new_h = scale
+            new_w = int(scale * aspect_ratio)
+        else:  # Height >= Width (scale applies to width)
+            new_w = scale
+            new_h = int(scale / aspect_ratio)
+        
+        # Resize image to the target scale
+        resized_img = TF.resize(img, (new_h, new_w))
+        
+        # Case 1: If scale <= min(output_size), pad to output_size
+        if scale <= min(self.output_size):
+            # Calculate padding needed for each dimension
+            pad_h = max(self.output_size[0] - new_h, 0)
+            pad_w = max(self.output_size[1] - new_w, 0)
+            
+            # Calculate padding for each side (center padding)
+            pad_top = pad_h // 2
+            pad_bottom = pad_h - pad_top
+            pad_left = pad_w // 2
+            pad_right = pad_w - pad_left
+            
+            if self.mode in ['replicate', 'circular', 'constant', 'reflect']:
+                transformed_img = F.pad(
+                    resized_img,
+                    (pad_left, pad_right, pad_top, pad_bottom),
+                    mode=self.mode
+                )
+            elif self.mode == 'gray':
+                transformed_img = pad_to_size_gray(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            elif self.mode == 'blue':
+                transformed_img = pad_to_size_blue(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            elif self.mode == 'noise':
+                transformed_img = pad_to_size_noise(resized_img.unsqueeze(0), self.output_size).squeeze(0)
+            else:
+                raise ValueError(f"Unsupported padding mode: {self.mode}")
+            
+        # Case 2: If scale > min(output_size), center crop to output_size
+        else:
+            # Calculate crop coordinates
+            crop_h = self.output_size[0]
+            crop_w = self.output_size[1]
+            
+            # Calculate top-left coordinates for center crop
+            top = (new_h - crop_h) // 2
+            left = (new_w - crop_w) // 2
+            
+            # Apply center crop
+            transformed_img = TF.crop(resized_img, top, left, crop_h, crop_w)
+        
+        return transformed_img
+    
+
 class CenterResizeCropPad:
     def __init__(self, output_size=(227, 227), scale=160, mode='constant'):
         """
@@ -333,6 +431,71 @@ class CenterResizeCropPad:
         
         return transformed_img
     
+class CenterCropPad:
+    def __init__(self, output_size=(227, 227), crop_size=160, mode='constant'):
+        """
+        Transform that crops from center to crop_size, then pads back to output_size.
+        This is different from CenterResizeCropPad which resizes first.
+        
+        Args:
+            output_size (tuple): The final output size (height, width) 
+            crop_size (int): The size to crop from center (receptive field size)
+            mode (str): Padding mode ('constant', 'gray', 'blue', 'noise', etc.)
+        """
+        self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        self.crop_size = crop_size
+        self.mode = mode
+        
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor): Image tensor of shape (C, H, W)
+        Returns:
+            Tensor: Transformed image tensor of shape (C, output_size[0], output_size[1])
+        """
+        _, orig_h, orig_w = img.shape
+        
+        # Step 1: Center crop to crop_size
+        # Calculate crop coordinates for center crop
+        crop_h = min(self.crop_size, orig_h)
+        crop_w = min(self.crop_size, orig_w)
+        
+        # Calculate top-left coordinates for center crop
+        top = (orig_h - crop_h) // 2
+        left = (orig_w - crop_w) // 2
+        
+        # Apply center crop
+        cropped_img = TF.crop(img, top, left, crop_h, crop_w)
+        
+        # Step 2: Pad the cropped image back to output_size
+        # Calculate padding needed for each dimension
+        pad_h = max(self.output_size[0] - crop_h, 0)
+        pad_w = max(self.output_size[1] - crop_w, 0)
+        
+        # Calculate padding for each side (center padding)
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        
+        # Apply padding based on mode
+        if self.mode in ['replicate', 'circular', 'constant', 'reflect']:
+            transformed_img = F.pad(
+                cropped_img,
+                (pad_left, pad_right, pad_top, pad_bottom),
+                mode=self.mode
+            )
+        elif self.mode == 'gray':
+            transformed_img = pad_to_size_gray(cropped_img.unsqueeze(0), self.output_size).squeeze(0)
+        elif self.mode == 'blue':
+            transformed_img = pad_to_size_blue(cropped_img.unsqueeze(0), self.output_size).squeeze(0)
+        elif self.mode == 'noise':
+            transformed_img = pad_to_size_noise(cropped_img.unsqueeze(0), self.output_size).squeeze(0)
+        else:
+            raise ValueError(f"Unsupported padding mode: {self.mode}")
+        
+        return transformed_img
+
 import os
 
 class DataLoaderTransformWrapper:

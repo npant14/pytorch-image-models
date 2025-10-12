@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pasupathy_new_array
-#SBATCH --partition=gpu-he
+#SBATCH --partition=gpu
+#SBATCH --account=carney-tserre-condo
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -41,6 +42,7 @@ echo "Array task ID: $SLURM_ARRAY_TASK_ID"
 # Add --no-neuron-analysis flag below if you want faster analysis without detailed neuron statistics
 
 # Run the evaluation for this specific model using enhanced analysis
+# python evaluate_hmax_pasupathy.py --model CHRESMAX_V3_2 --use-new --layer model_backbone.s1
 python evaluate_hmax_pasupathy.py --model $model --use-new
 
 echo "Evaluation completed for model: $model"

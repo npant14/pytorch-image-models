@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import numpy as np
 
 import sys
 sys.path.append("/users/xyu110/pytorch-image-models")
@@ -9,8 +10,10 @@ from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2
 from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
 
-# Import our Pasupathy class
+# Import our Pasupathy classes
 from pasupathy import Pasupathy
+from pasupathy_new import Pasupathy as PasupathyNew
+from test_rf5 import RFAnalyzer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -18,8 +21,7 @@ def get_all_layer_names(model):
     """Extract all layer names from a model"""
     layer_names = []
     for name, module in model.named_modules():
-        if len(list(module.children())) == 0:  # Leaf modules only
-            layer_names.append(name)
+        layer_names.append(name)
     return layer_names
 
 def load_chresmax_v3_2_abs():
@@ -112,8 +114,164 @@ baselines = [
 ]
 
 # Pasupathy data directory
-PASUPATHY_DATA_DIR = "/users/xyu110/scratch/subplots"
+PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
 OUTPUT_DIR = "./pasupathy_results"
+
+def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_analysis=True):
+    """Evaluate a single model on Pasupathy experiment using the new enhanced analysis"""
+
+    model = get_model(model_name).to(device).eval()
+    
+    imgsize = 322
+    if model_name in baselines:
+        imgsize = 227
+    
+    # Get all available layers if no specific layer is provided
+    if layer_name is None:
+        layer_names = get_all_layer_names(model)
+    else:
+        layer_names = [layer_name]
+        
+    rfanalyzer = RFAnalyzer(enable_upper_bound=True)
+    rf_analysis_results = rfanalyzer.analyze_model(model, input_size=imgsize)
+        
+    # filtered_layer_names = []
+    # for ln in layer_names:
+    #     # Skip empty layer names
+    #     if not ln.strip():
+    #         continue
+    #     # Skip activation layers (ReLU, etc.)
+    #     if any(act_type in ln.lower() for act_type in ['relu', 'sigmoid', 'tanh', 'gelu', 'silu', 'activation']):
+    #         continue
+    #     # Skip batch normalization layers
+    #     if any(bn_type in ln.lower() for bn_type in ['batchnorm', 'bn', 'batch_norm']):
+    #         continue
+    #     # Skip dropout layers
+    #     if 'dropout' in ln.lower():
+    #         continue
+    #     filtered_layer_names.append(ln)
+    
+    # layer_names = filtered_layer_names
+    
+    # get intersection of layer_names and rf_layer_names
+    rf_layer_names = [x['name'] for x in rf_analysis_results]
+    layer_names = [ln for ln in layer_names if ln in rf_layer_names]
+        
+    print(f"Will evaluate {len(layer_names)} layers for {model_name} using enhanced analysis")
+    
+    results = []
+    
+    # Set up results file paths
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    results_file = os.path.join(OUTPUT_DIR, "all_pasupathy_scores_new.csv")
+    
+    # Create subdirectories for detailed results
+    neuron_analysis_dir = os.path.join(OUTPUT_DIR, f"neuron_analysis_{model_name}")
+    os.makedirs(neuron_analysis_dir, exist_ok=True)
+    
+    for layer in layer_names:
+        try:
+            print(f"Evaluating {model_name} on layer: {layer}")
+            rf_size = rf_analysis_results[layer]['rf_size'][0]
+
+            # Set up enhanced Pasupathy experiment
+            pasupathy_exp = PasupathyNew(
+                model=model, 
+                outdir=neuron_analysis_dir, 
+                device=device, 
+                data_dir=PASUPATHY_DATA_DIR, 
+                rf_size=rf_size,
+                img_size=imgsize, 
+                layer=layer,
+                curv_sets=[1, 2],  # Default curvature sets
+                rotations=list(range(1, 8)),  # Rotations 1-7
+                scales=[0.4, 0.6, 0.8, 1.0]  # Default scales
+            )
+            
+            if use_neuron_analysis:
+                print(f"Running comprehensive neuron analysis for {layer}...")
+                comprehensive_results = pasupathy_exp.run_neuron_analysis()
+                
+                pasupathy_exp.save_comprehensive_results(comprehensive_results, save_path=neuron_analysis_dir)
+                
+                # Extract key metrics
+                summary_stats = comprehensive_results['summary_statistics']
+                pasupathy_score = summary_stats['slope_mean']  # Main Pasupathy score
+                total_neurons = summary_stats['total_neurons']
+                r_squared_mean = summary_stats['r_squared_mean']
+                slope_std = summary_stats['slope_std']
+                
+                print(f"Pasupathy Score (mean slope) for {model_name}, {layer}: {pasupathy_score:.4f}")
+                print(f"Total neurons analyzed: {total_neurons}")
+                print(f"Mean R-squared: {r_squared_mean:.4f}")
+                print(f"Score standard deviation: {slope_std:.4f}")
+                
+                # Store detailed results
+                results.append((model_name, layer, pasupathy_score, total_neurons, r_squared_mean, slope_std))
+                
+                if not os.path.exists(results_file):
+                    with open(results_file, "w") as f:
+                        f.write("model,layer,pasupathy_score,total_neurons,r_squared_mean,slope_std\n")
+
+                # Save result to file with additional metrics
+                with open(results_file, "a") as f:
+                    f.write(f"{model_name},{layer},{pasupathy_score:.4f},{total_neurons},{r_squared_mean:.4f},{slope_std:.4f}\n")
+                
+                # Create a summary file for this specific model-layer combination
+                clean_layer_name = layer.replace('.', '_').replace('/', '_')
+                summary_file = os.path.join(neuron_analysis_dir, f"{clean_layer_name}_summary.txt")
+                
+                with open(summary_file, "w") as f:
+                    f.write(f"Pasupathy Analysis Summary\n")
+                    f.write(f"=" * 50 + "\n")
+                    f.write(f"Model: {model_name}\n")
+                    f.write(f"Layer: {layer}\n")
+                    f.write(f"Image size: {imgsize}\n")
+                    f.write(f"\nKey Results:\n")
+                    f.write(f"  Pasupathy Score (mean slope): {pasupathy_score:.4f} ± {slope_std:.4f}\n")
+                    f.write(f"  Total neurons analyzed: {total_neurons}\n")
+                    f.write(f"  Mean R-squared (fit quality): {r_squared_mean:.4f} ± {summary_stats['r_squared_std']:.4f}\n")
+                    f.write(f"  Median scale invariance score: {summary_stats['slope_median']:.4f}\n")
+                    f.write(f"  Mean maximum activity: {summary_stats['max_activity_mean']:.4f} ± {summary_stats['max_activity_std']:.4f}\n")
+                    f.write(f"\nPreferred Rotation Distribution:\n")
+                    for rotation, count in summary_stats['preferred_rotations'].items():
+                        percentage = (count / total_neurons) * 100
+                        f.write(f"  Rotation {rotation}: {count} neurons ({percentage:.1f}%)\n")
+                    f.write(f"\nFiles generated:\n")
+                    f.write(f"  - Histogram plots: {model_name}_{clean_layer_name}_histograms.png\n")
+                    f.write(f"  - Complete results: {model_name}_{clean_layer_name}_results.json/pkl\n")
+                    f.write(f"  - Summary statistics: {model_name}_{clean_layer_name}_stats.csv\n")
+                
+                print(f"Analysis summary saved to: {summary_file}")
+                
+            # Clean up GPU memory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            # Re-raise BdbQuit to allow proper debugger exit
+            import bdb
+            if isinstance(e, bdb.BdbQuit):
+                raise e
+            
+            print(f"Error evaluating {model_name} on layer {layer}: {e}")
+            
+            import traceback
+            print("Full traceback:")
+            traceback.print_exc()  # This will show the exact line
+
+            results.append((model_name, layer, "FAILED", "N/A", "N/A", "N/A"))
+            if not os.path.exists(results_file):
+                with open(results_file, "w") as f:
+                    f.write("model,layer,pasupathy_score,total_neurons,r_squared_mean,slope_std\n")
+            with open(results_file, "a") as f:
+                f.write(f"{model_name},{layer},FAILED,N/A,N/A,N/A\n")
+            # Clean up GPU memory even on error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            continue
+
+    return results
 
 def evaluate_model_on_pasupathy(model_name, layer_name=None):
     """Evaluate a single model on Pasupathy experiment"""
@@ -240,6 +398,10 @@ def evaluate_model_on_pasupathy(model_name, layer_name=None):
         print(f"Error loading model {model_name}: {e}")
         return [(model_name, "N/A", "FAILED")]
 
+def evaluate_all_models_new(use_neuron_analysis=True):
+   # TODO
+   return
+
 def evaluate_all_models():
     """Evaluate all HMAX models on Pasupathy experiment"""
     print("Starting Pasupathy evaluation for all HMAX models on all layers...")
@@ -279,7 +441,9 @@ def evaluate_all_models():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate HMAX models on Pasupathy experiment")
     parser.add_argument('--model', type=str, help="Specific model to evaluate (optional)")
-    parser.add_argument('--layer', type=str, help="Specific layer to evaluate (optional)")
+    parser.add_argument('--use-new', action='store_true', help="Use enhanced neuron analysis (default: False)")
+    parser.add_argument('--layer', type=str, default=None, help="Specific layer to evaluate (optional)")
+
     args = parser.parse_args()
     
     if args.model:
@@ -289,15 +453,34 @@ if __name__ == "__main__":
             exit(1)
         
         print(f"Evaluating specific model: {args.model}")
-        results = evaluate_model_on_pasupathy(args.model, args.layer)
         
-        print("\nResults:")
-        print("model,layer,score")
-        for model_name, layer, score in results:
-            if isinstance(score, float):
-                print(f"{model_name},{layer},{score:.4f}")
-            else:
-                print(f"{model_name},{layer},{score}")
+        if args.use_new:
+            # Use enhanced analysis
+            print(f"Using enhanced Pasupathy analysis with neuron analysis")
+            results = evaluate_model_on_pasupathy_new(args.model, args.layer, use_neuron_analysis=True)
+            
+            print("model,layer,mean_slope,total_neurons,r_squared_mean,slope_std")
+            for model_name, layer, score, neurons, r_squared, std_dev in results:
+                if isinstance(score, float):
+                    print(f"{model_name},{layer},{score:.4f},{neurons},{r_squared:.4f},{std_dev:.4f}")
+                else:
+                    print(f"{model_name},{layer},{score},{neurons},{r_squared},{std_dev}")
+        else:
+            # Use original analysis
+            print("Using original Pasupathy analysis")
+            results = evaluate_model_on_pasupathy(args.model, args.layer)
+            
+            print("\nResults:")
+            print("model,layer,score")
+            for model_name, layer, score in results:
+                if isinstance(score, float):
+                    print(f"{model_name},{layer},{score:.4f}")
+                else:
+                    print(f"{model_name},{layer},{score}")
     else:
         # Evaluate all models
-        evaluate_all_models() 
+        if args.use_new:
+            evaluate_all_models_new()
+        else:
+            print("Using original Pasupathy analysis for all models")
+            evaluate_all_models() 

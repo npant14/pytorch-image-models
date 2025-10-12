@@ -126,3 +126,4 @@ Testing notebook.ipynb
 pasupathy_results/
 job_scripts/
 val_scripts/
+jupyter-log.txt
