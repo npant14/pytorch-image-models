@@ -115,7 +115,7 @@ baselines = [
 
 # Pasupathy data directory
 PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
-OUTPUT_DIR = "./pasupathy_results"
+OUTPUT_DIR = "./pasupathy_results_1013"
 
 def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_analysis=True):
     """Evaluate a single model on Pasupathy experiment using the new enhanced analysis"""
@@ -134,29 +134,12 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
         
     rfanalyzer = RFAnalyzer(enable_upper_bound=True)
     rf_analysis_results = rfanalyzer.analyze_model(model, input_size=imgsize)
-        
-    # filtered_layer_names = []
-    # for ln in layer_names:
-    #     # Skip empty layer names
-    #     if not ln.strip():
-    #         continue
-    #     # Skip activation layers (ReLU, etc.)
-    #     if any(act_type in ln.lower() for act_type in ['relu', 'sigmoid', 'tanh', 'gelu', 'silu', 'activation']):
-    #         continue
-    #     # Skip batch normalization layers
-    #     if any(bn_type in ln.lower() for bn_type in ['batchnorm', 'bn', 'batch_norm']):
-    #         continue
-    #     # Skip dropout layers
-    #     if 'dropout' in ln.lower():
-    #         continue
-    #     filtered_layer_names.append(ln)
-    
-    # layer_names = filtered_layer_names
     
     # get intersection of layer_names and rf_layer_names
     rf_layer_names = [x['name'] for x in rf_analysis_results]
     layer_names = [ln for ln in layer_names if ln in rf_layer_names]
-        
+    rf_dict = {result['name']: result['rf'][0] for result in rf_analysis_results}
+    
     print(f"Will evaluate {len(layer_names)} layers for {model_name} using enhanced analysis")
     
     results = []
@@ -172,7 +155,7 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
     for layer in layer_names:
         try:
             print(f"Evaluating {model_name} on layer: {layer}")
-            rf_size = rf_analysis_results[layer]['rf_size'][0]
+            rf_size = rf_dict[layer]
 
             # Set up enhanced Pasupathy experiment
             pasupathy_exp = PasupathyNew(
@@ -192,7 +175,7 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
                 print(f"Running comprehensive neuron analysis for {layer}...")
                 comprehensive_results = pasupathy_exp.run_neuron_analysis()
                 
-                pasupathy_exp.save_comprehensive_results(comprehensive_results, save_path=neuron_analysis_dir)
+                pasupathy_exp.save_comprehensive_results(comprehensive_results)
                 
                 # Extract key metrics
                 summary_stats = comprehensive_results['summary_statistics']
@@ -219,7 +202,10 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
                 
                 # Create a summary file for this specific model-layer combination
                 clean_layer_name = layer.replace('.', '_').replace('/', '_')
-                summary_file = os.path.join(neuron_analysis_dir, f"{clean_layer_name}_summary.txt")
+                # create folder for summary
+                neuron_analysis_dir_summary = os.path.join(neuron_analysis_dir, "summaries")
+                os.makedirs(neuron_analysis_dir_summary, exist_ok=True)
+                summary_file = os.path.join(neuron_analysis_dir_summary, f"{clean_layer_name}_summary.txt")
                 
                 with open(summary_file, "w") as f:
                     f.write(f"Pasupathy Analysis Summary\n")
@@ -398,45 +384,6 @@ def evaluate_model_on_pasupathy(model_name, layer_name=None):
         print(f"Error loading model {model_name}: {e}")
         return [(model_name, "N/A", "FAILED")]
 
-def evaluate_all_models_new(use_neuron_analysis=True):
-   # TODO
-   return
-
-def evaluate_all_models():
-    """Evaluate all HMAX models on Pasupathy experiment"""
-    print("Starting Pasupathy evaluation for all HMAX models on all layers...")
-    
-    # Initialize CSV file with header
-    results_file = os.path.join(OUTPUT_DIR, "all_pasupathy_scores.csv")
-    with open(results_file, "w") as f:
-        f.write("model,layer,score\n")
-    
-    all_results = []
-    
-    for model_name in hmax_models:
-        print(f"\n{'='*50}")
-        print(f"Evaluating: {model_name}")
-        print(f"{'='*50}")
-        
-        model_results = evaluate_model_on_pasupathy(model_name)
-        all_results.extend(model_results)
-        
-        # Clean up GPU memory
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    
-    # Print summary
-    print(f"\n{'='*50}")
-    print("SUMMARY OF RESULTS")
-    print(f"{'='*50}")
-    print("model,layer,score")
-    for model_name, layer, score in all_results:
-        if isinstance(score, float):
-            print(f"{model_name},{layer},{score:.4f}")
-        else:
-            print(f"{model_name},{layer},{score}")
-    
-    return all_results
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate HMAX models on Pasupathy experiment")
@@ -458,13 +405,7 @@ if __name__ == "__main__":
             # Use enhanced analysis
             print(f"Using enhanced Pasupathy analysis with neuron analysis")
             results = evaluate_model_on_pasupathy_new(args.model, args.layer, use_neuron_analysis=True)
-            
-            print("model,layer,mean_slope,total_neurons,r_squared_mean,slope_std")
-            for model_name, layer, score, neurons, r_squared, std_dev in results:
-                if isinstance(score, float):
-                    print(f"{model_name},{layer},{score:.4f},{neurons},{r_squared:.4f},{std_dev:.4f}")
-                else:
-                    print(f"{model_name},{layer},{score},{neurons},{r_squared},{std_dev}")
+
         else:
             # Use original analysis
             print("Using original Pasupathy analysis")
@@ -477,10 +418,3 @@ if __name__ == "__main__":
                     print(f"{model_name},{layer},{score:.4f}")
                 else:
                     print(f"{model_name},{layer},{score}")
-    else:
-        # Evaluate all models
-        if args.use_new:
-            evaluate_all_models_new()
-        else:
-            print("Using original Pasupathy analysis for all models")
-            evaluate_all_models() 

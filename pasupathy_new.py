@@ -14,12 +14,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 import pickle
+from scipy import stats
 
 # Default configuration constants
 DEFAULT_CURV_SETS = [1, 2]
 DEFAULT_ROTATIONS = list(range(1, 8))  # 1 to 7
 DEFAULT_SCALES = [0.4, 0.6, 0.8, 1.0]
-DEFAULT_IMG_SIZE = 322 # TODO: receptive field size 
+DEFAULT_IMG_SIZE = 322
 DEFAULT_LAYER = "s3.layer.3.conv3"
 DEFAULT_PROGRESS_INTERVAL = 10
 
@@ -108,7 +109,12 @@ class Pasupathy():
         self.scales = scales if scales is not None else DEFAULT_SCALES
         self.progress_interval = progress_interval
         
-        print("setup Pasupathy experiment -- ready to run")
+        self.outdir_figures = os.path.join(self.outdir, 'figures')
+        self.outdir_neuron_data = os.path.join(self.outdir, 'neuron_data')
+        
+        os.makedirs(self.outdir_figures, exist_ok=True)
+        os.makedirs(self.outdir_neuron_data, exist_ok=True)
+        
         print(f"Configuration: curv_sets={self.curv_sets}, rotations={self.rotations}, scales={self.scales}")
 
     def resize_image(self, image, size):
@@ -321,12 +327,28 @@ class Pasupathy():
                 avg_activities.append(np.mean(scale_avg_activities[scale]))
             
             # Calculate slope (scale invariance score)
-            if len(scales) > 1:
-                slope, intercept = np.polyfit(scales, avg_activities, 1)
-                r_squared = np.corrcoef(scales, avg_activities)[0, 1] ** 2
-            else:
-                slope, intercept, r_squared = 0, 0, 0
+            # if len(scales) > 1:
+            #     slope, intercept = np.polyfit(scales, avg_activities, 1)
+            #     r_squared = np.corrcoef(scales, avg_activities)[0, 1] ** 2
+            # else:
+            #     slope, intercept, r_squared = 0, 0, 0
             
+            # neuron_scale_analysis[neuron_idx] = {
+            #     'preferred_rotation': preferred_rot,
+            #     'scales': scales,
+            #     'activities': avg_activities,
+            #     'slope': slope,
+            #     'intercept': intercept,
+            #     'r_squared': r_squared,
+            #     'max_activity_at_preferred': pref_data['max_activity']
+            # }
+            
+            if len(scales) > 1:
+                slope, intercept, r_value, p_value, std_err = stats.linregress(scales, avg_activities)
+                r_squared = r_value ** 2
+            else:
+                slope, intercept, r_squared, p_value, std_err = 0, 0, 0, 1.0, 0
+
             neuron_scale_analysis[neuron_idx] = {
                 'preferred_rotation': preferred_rot,
                 'scales': scales,
@@ -334,10 +356,71 @@ class Pasupathy():
                 'slope': slope,
                 'intercept': intercept,
                 'r_squared': r_squared,
+                'p_value': p_value,
+                'std_err': std_err,
+                'is_significant': p_value < 0.05,
                 'max_activity_at_preferred': pref_data['max_activity']
             }
         
         return neuron_scale_analysis
+    
+    def plot_slope_distribution_figureA(self, neuron_scale_analysis, save_path=None):
+        """
+        Creates a stacked histogram showing the distribution of slopes,
+        replicating the style of Figure 4A from the paper.
+        """
+        significant_slopes = []
+        non_significant_slopes = []
+        
+        for neuron_id, data in neuron_scale_analysis.items():
+            if data.get('is_significant', False):
+                significant_slopes.append(data['slope'])
+            else:
+                non_significant_slopes.append(data['slope'])
+
+        num_neurons = len(significant_slopes) + len(non_significant_slopes)
+        if num_neurons == 0:
+            print("No neuron data to plot.")
+            return
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        
+        weights_sig = np.ones_like(significant_slopes) / num_neurons
+        weights_nonsig = np.ones_like(non_significant_slopes) / num_neurons
+
+        # This single call creates the stacked effect correctly.
+        # The first item in the list (`significant_slopes`) is plotted at the bottom in the first color ('black').
+        # The second item (`non_significant_slopes`) is stacked on top in the second color ('lightgray').
+        ax.hist(
+            [significant_slopes, non_significant_slopes],
+            bins=15, # You can adjust the number of bins or provide specific bin edges
+            stacked=True,
+            weights=[weights_sig, weights_nonsig],
+            color=['black', 'lightgray'],
+            edgecolor='black'
+        )
+            
+        all_slopes = significant_slopes + non_significant_slopes
+        median_slope = np.median(all_slopes)
+        # Place the marker above the plot area for better visibility
+        ax.plot(median_slope, 0.55, 'v', color='gray', markersize=12, clip_on=False, zorder=4)
+        
+        ax.set_title(f'A scale test\nN={num_neurons}', loc='left', fontsize=14)
+        ax.set_xlabel('slope [Δ tuning centroid]', fontsize=12)
+        ax.set_ylabel('proportion of neurons', fontsize=12)
+
+        # Remove the top and right borders
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Figure saved to {save_path}")
+            
+        plt.close()
+            
 
     def create_score_histograms(self, neuron_scale_analysis, save_path=None):
         """
@@ -365,7 +448,7 @@ class Pasupathy():
             preferred_rotations.append(data['preferred_rotation'])
         
         # Create figure with subplots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        _, axes = plt.subplots(2, 2, figsize=(15, 12))
         
         # 1. Slope distribution
         axes[0, 0].hist(slopes, bins=30, alpha=0.7, color='skyblue', edgecolor='black', density=True)
@@ -419,9 +502,8 @@ class Pasupathy():
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"Histograms saved to {save_path}")
-        
-        plt.show()
-        
+        plt.close()  # Close figure to prevent memory warnings
+                
         # Calculate summary statistics
         summary_stats = {
             'total_neurons': len(slopes),
@@ -446,10 +528,6 @@ class Pasupathy():
         """
         print("Starting comprehensive neuron analysis...")
         print(f"Configuration: curv_sets={self.curv_sets}, rotations={self.rotations}, scales={self.scales}")
-
-        # TODO: abs value? check paper
-        
-        # TODO: only a small subset of neurons showed systematic shifts in their stimulus preferences, as indicated by significant linear regression slopes (N = 13/80; black).
         
         # TODO: Percentage across layers
         
@@ -461,26 +539,17 @@ class Pasupathy():
         print("="*60)
         included_neurons, rejected_neurons, rejection_reasons = self.select_neurons(self.layer)
         
-        if not included_neurons:
-            print("No neurons passed the selection criteria. Aborting analysis.")
-            return {}
-
         # Step 1: Find preferred orientations for each neuron
         print("\n" + "="*60)
         print("STEP 1: Finding preferred orientations for each neuron")
         print("="*60)
         
-        # Load sample images with cropping already applied
         sample_imgs = load_images(self.data_dir, self.curv_sets[0], self.rotations[0], self.img_size, self.rf_size)
-        
-        if not sample_imgs:
-            raise ValueError("No images found. Check data directory and parameters.")
         
         preferred_orientations = self.find_preferred_orientations(
             self.model, sample_imgs, self.layer, canonical_scale=1.0
         )
         
-        # Filter preferred_orientations to only include selected neurons
         preferred_orientations = {k: v for k, v in preferred_orientations.items() if k in included_neurons}
 
         # Step 2: Analyze scale invariance for each neuron at its preferred orientation
@@ -497,8 +566,10 @@ class Pasupathy():
         print("STEP 3: Creating histograms and summary statistics")
         print("="*60)
         
-        histogram_path = os.path.join(self.outdir, f'{self.layer.replace(".", "_")}.png')
+        histogram_path = os.path.join(self.outdir_figures, f'{self.layer.replace(".", "_")}.png')
         summary_stats = self.create_score_histograms(neuron_scale_analysis, histogram_path)
+        self.plot_slope_distribution_figureA(neuron_scale_analysis,
+            save_path=os.path.join(self.outdir_figures, f'{self.layer.replace(".", "_")}_figureA.png'))
         
         # Step 4: Compile comprehensive results
         print("\n" + "="*60)
@@ -527,6 +598,9 @@ class Pasupathy():
                 'preferred_rotation': data['preferred_rotation'],
                 'scale_invariance_score': data['slope'],
                 'r_squared': data['r_squared'],
+                'p_value': data['p_value'],
+                'std_err': data['std_err'],
+                'is_significant': data['is_significant'],
                 'max_activity': data['max_activity_at_preferred'],
                 'scale_activity_curve': {
                     'scales': data['scales'],
@@ -550,7 +624,7 @@ class Pasupathy():
         
         return comprehensive_results
 
-    def save_comprehensive_results(self, comprehensive_results, save_path=None):
+    def save_comprehensive_results(self, comprehensive_results):
         """
         Save comprehensive results to files for later analysis.
         
@@ -558,8 +632,8 @@ class Pasupathy():
             comprehensive_results: Results from run_neuron_analysis()
             save_path: Base path for saving files (default: outdir)
         """
-        if save_path is None:
-            save_path = self.outdir
+        
+        save_path = self.outdir_neuron_data
         
         # Save as JSON (human readable)
         json_path = os.path.join(save_path, f'{self.layer.replace(".", "_")}.json')
@@ -597,41 +671,23 @@ class Pasupathy():
         csv_path = os.path.join(save_path, f'{self.layer.replace(".", "_")}.csv')
         individual_data = comprehensive_results['individual_neuron_data']
         
-        print(f"DEBUG: About to create CSV file at: {csv_path}")
-        print(f"DEBUG: Individual data length: {len(individual_data)}")
-        
-        try:
-            with open(csv_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['neuron_index', 'preferred_rotation', 'scale_invariance_score', 
-                               'r_squared', 'max_activity'])
-                
-                rows_written = 0
-                for neuron_data in individual_data:
-                    try:
-                        writer.writerow([
-                            neuron_data['neuron_index'],
-                            neuron_data['preferred_rotation'],
-                            neuron_data['scale_invariance_score'],
-                            neuron_data['r_squared'],
-                            neuron_data['max_activity']
-                        ])
-                        rows_written += 1
-                    except KeyError as e:
-                        print(f"DEBUG: Missing key in neuron_data: {e}")
-                        print(f"DEBUG: Available keys: {list(neuron_data.keys())}")
-                        raise
-                    except Exception as e:
-                        print(f"DEBUG: Error writing row for neuron {neuron_data.get('neuron_index', 'unknown')}: {e}")
-                        raise
-                
-                print(f"DEBUG: Successfully wrote {rows_written} rows to CSV")
-                
-        except Exception as e:
-            print(f"ERROR: Failed to create CSV file: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['neuron_index', 'preferred_rotation', 'scale_invariance_score', 
+                        'r_squared', 'p_value', 'std_err', 'is_significant', 'max_activity'])
+            
+            for neuron_data in individual_data:
+                writer.writerow([
+                    neuron_data['neuron_index'],
+                    neuron_data['preferred_rotation'],
+                    neuron_data['scale_invariance_score'],
+                    neuron_data['r_squared'],
+                    neuron_data['p_value'],
+                    neuron_data['std_err'],
+                    neuron_data['is_significant'],
+                    neuron_data['max_activity']
+                ])
+            
         
         print(f"Results saved to:")
         print(f"  JSON: {json_path}")
@@ -769,7 +825,6 @@ class Pasupathy():
             try:
                 # Generate low-contrast random noise image at full image size
                 # very close to black, and low contrast + little bit noise
-                # TODO: get mean response for different std in response to stimuli
                 noise = torch.clamp(torch.normal(mean=0.5, std=noise_std, size=(3, self.img_size, self.img_size)), 0, 1)
                 
                 # Apply RF cropping if needed (same as other images)
@@ -822,6 +877,11 @@ class Pasupathy():
                         
                         # Extract center activations for all neurons
                         center_activations = self.extract_center_activations(layer_features, img_resized, layer)
+                        
+                        # Check if the layer is supported (center_activations is not None)
+                        if center_activations is None:
+                            print(f"Layer {layer} has unsupported tensor shape. Aborting analysis.")
+                            return None, 0
                         
                         all_responses.append(center_activations)
                         
