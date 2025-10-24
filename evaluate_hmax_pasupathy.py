@@ -113,9 +113,15 @@ baselines = [
     "RESNET18-AUG",
 ]
 
+layers_to_eval = {
+    'CHRESMAX_V3_2': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3'],
+    'RESNET50': ['layer1', 'layer2', 'layer3', 'layer4'],
+    'RESNET18-AUG': ['layer1', 'layer2', 'layer3', 'layer4'],
+}
+
 # Pasupathy data directory
 PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
-OUTPUT_DIR = "./pasupathy_results_1013"
+OUTPUT_DIR = "./pasupathy_results_1023"
 
 def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_analysis=True):
     """Evaluate a single model on Pasupathy experiment using the new enhanced analysis"""
@@ -140,6 +146,11 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
     layer_names = [ln for ln in layer_names if ln in rf_layer_names]
     rf_dict = {result['name']: result['rf'][0] for result in rf_analysis_results}
     
+    print(layer_names)
+    
+    if model_name in layers_to_eval:
+        layer_names = layers_to_eval[model_name]
+
     print(f"Will evaluate {len(layer_names)} layers for {model_name} using enhanced analysis")
     
     results = []

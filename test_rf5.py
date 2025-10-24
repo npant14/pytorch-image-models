@@ -231,9 +231,14 @@ class RFAnalyzer:
             
             return # Stop further recursion as we've handled the block
             
+        # Store RF state before traversing children
+        rf_before = list(self.rf)
+        j_before = list(self.j)
+        has_children = False
 
         # Generic traversal for other modules
         for name, child in module.named_children():
+            has_children = True
             child_name = f"{prefix}.{name}" if prefix else name
             
             if len(list(child.children())) > 0:
@@ -242,6 +247,15 @@ class RFAnalyzer:
             else:
                 # If it's a leaf module (layer), update RF
                 self._update_rf(child_name, child)
+        
+        # After processing all children, if this is a non-leaf module and RF changed,
+        # record the RF for this module (which is the RF of its last layer)
+        if prefix and has_children:
+            self.results.append({
+                'name': prefix,
+                'rf': tuple(self.rf),
+                'j': tuple(self.j)
+            })
 
 # --- Analysis Script ---
 if __name__ == "__main__":

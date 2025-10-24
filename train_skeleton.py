@@ -542,8 +542,13 @@ def main():
     target_size = tuple(data_config['input_size'][1:])  # Assuming input_size is (C, H, W)
     
     if args.add_wrapped_dataloader:
-        print("Using Zoom Out Padding!")
-        transform = RandomResizePad(original_size=target_size, min_size=160)
+        # print("Using Zoom Out Padding!")
+        # transform = RandomResizePad(original_size=target_size, min_size=160)
+        transform = RandomCenterResizeCropPad(
+            output_size=target_size, 
+            scale_choices=[160, 192, 227, 270, 322, 382, 454],
+            mode='constant'
+        )
         loader_train = DataLoaderTransformWrapper(loader_train, transform)
 
     loader_eval = None

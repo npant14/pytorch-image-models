@@ -496,7 +496,8 @@ def load_chresmax_v3_2_abs(layername=None):
 
 
 def load_alexnet(layername=None):
-    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    # checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/sep/alexnet_fair_comparasion/model_best.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = alexnet(channel_size=227).to(device).eval()
     model.load_state_dict(checkpoint['state_dict'], strict=False)
@@ -506,7 +507,8 @@ def load_alexnet(layername=None):
 
 
 def load_resnet18(layername=None):
-    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    # checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/sep/resnet_18_fair_comparasion/model_best.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = resnet18(channel_size=227).to(device).eval()
     model.load_state_dict(checkpoint['state_dict'], strict=False)

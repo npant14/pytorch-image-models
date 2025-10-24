@@ -619,6 +619,7 @@ class CH_2_streams_training_eval_sep(nn.Module):
             print(f"{name:30s} | {count:10,d} | {count/total_params*100:9.1f}%")
         print(f"{'Total':30s} | {total_params:10,d} | {100:9.1f}%")
 
+
 @register_model
 def hmax3(pretrained=False, **kwargs):
     """

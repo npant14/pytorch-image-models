@@ -553,8 +553,8 @@ class RESMAX_V2_1(nn.Module):
 """smart choose bands after c2b"""
 class RESMAX_V2_2(nn.Module):
     def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
-                 ip_scale_bands=1, classifier_input_size=13312, contrastive_loss=False, pyramid=False,
-                 bypass=False, main_route=False,
+                 ip_scale_bands=3, classifier_input_size=18432, contrastive_loss=False, pyramid=False,
+                 bypass=True, main_route=False,
                  c_scoring='v2',
                  **kwargs):
         """
@@ -2566,6 +2566,156 @@ class RESMAX_abs_bypass_only(nn.Module):
             print(f"{name:30s} | {count:10,d} | {pct:10.2f}%")
         print("-" * 60)
         print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
+
+
+class CH_2_streams_adjacent_scales(nn.Module):
+    """
+    Contrastive learning model with adjacent scale pairs instead of original vs random scale.
+    Performs contrastive alignment between adjacent scale pairs like (0.49, 0.59), (0.59, 0.707), etc.
+    """
+    def __init__(self, 
+                 contrastive_loss=True,
+                 bypass=True,
+                 model_backbone=None,
+                 bypass_only_model_bool=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.bypass = bypass
+        self.model_backbone = model_backbone
+        self.bypass_only_model_bool = bypass_only_model_bool
+        
+        self.model_backbone.contrastive_loss = contrastive_loss
+        self.num_classes = self.model_backbone.num_classes
+        
+        # Define scale factor list and adjacent pairs
+        self.scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        self.adjacent_pairs = [(self.scale_factor_list[i], self.scale_factor_list[i+1]) 
+                              for i in range(len(self.scale_factor_list)-1)]
+        
+        self.print_param_stats(model_backbone)
+        
+    def _apply_scale_and_resize(self, x, scale_factor):
+        """Apply scale factor and resize back to original dimensions"""
+        img_hw = x.shape[-1]
+        new_hw = int(img_hw * scale_factor)
+        x_scaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+
+        if new_hw <= img_hw:
+            # pad if smaller
+            x_scaled = pad_to_size(x_scaled, (img_hw, img_hw))
+        else:
+            # center-crop if bigger
+            center_crop = torchvision.transforms.CenterCrop(img_hw)
+            x_scaled = center_crop(x_scaled)
+            
+        return x_scaled
+        
+    def forward(self, x):
+        """
+        Creates two streams with adjacent scale pairs for scale-consistency training.
+        During training: uses adjacent scaled pairs for contrastive learning
+        During validation: uses original unscaled image
+        Returns:
+            (output, correct_scale_loss)
+        """
+        # During validation/evaluation, use original unscaled image
+        if not self.training:
+            result = self.model_backbone(x)
+            correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
+            
+            if self.bypass_only_model_bool:
+                if self.bypass:
+                    output, _, _ = result
+                else:
+                    output, _ = result
+            else:
+                if self.bypass:
+                    output, _, _, _ = result
+                else:
+                    output, _, _ = result
+            
+            return output, correct_scale_loss
+        
+        # Training mode: use adjacent scale pairs for contrastive learning
+        # Randomly select an adjacent pair
+        scale_1, scale_2 = random.choice(self.adjacent_pairs)
+        
+        # Create two scaled versions
+        x_scale_1 = self._apply_scale_and_resize(x, scale_1)
+        x_scale_2 = self._apply_scale_and_resize(x, scale_2)
+        
+        # Forward pass on first scaled input
+        result_1 = self.model_backbone(x_scale_1)
+        if self.bypass_only_model_bool:
+            if self.bypass:
+                stream_1_output, stream_1_c1_feats, stream_1_bypass = result_1
+            else:
+                stream_1_output, stream_1_c1_feats = result_1
+        else:
+            if self.bypass:
+                stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result_1
+            else:
+                stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result_1
+
+        # Forward pass on second scaled input
+        result_2 = self.model_backbone(x_scale_2)
+        if self.bypass_only_model_bool:
+            if self.bypass:
+                stream_2_output, stream_2_c1_feats, stream_2_bypass = result_2
+            else:
+                stream_2_output, stream_2_c1_feats = result_2
+        else:
+            if self.bypass:
+                stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result_2
+            else:
+                stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result_2
+
+        # Compute scale-consistency loss between the two adjacent scale streams
+        c1_correct_scale_loss = 0
+        for i in range(len(stream_1_c1_feats)):
+            c1_correct_scale_loss += torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i]))
+        c1_correct_scale_loss /= len(stream_1_c1_feats)  # Average over all feature maps
+        
+        # Add C2 loss calculation for non-bypass-only models
+        if not self.bypass_only_model_bool:
+            c2_correct_scale_loss = 0
+            for i in range(len(stream_1_c2_feats)):
+                c2_correct_scale_loss += torch.mean(torch.abs(stream_1_c2_feats[i] - stream_2_c2_feats[i]))
+            c2_correct_scale_loss /= len(stream_1_c2_feats)  # Average over all feature maps
+        else:
+            c2_correct_scale_loss = 0
+        
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = 0
+
+        correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
+
+        # Return the output from the first stream (could also average both streams)
+        return stream_1_output, correct_scale_loss
+
+    def print_param_stats(self, backbone):
+        print(f"\nParameter breakdown for {backbone.__class__.__name__} (Adjacent Scales):\n")
+        total_params = 0
+        stats = []
+        for name, module in backbone.named_children():
+            n_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
+            total_params += n_params
+            stats.append((name, n_params))
+
+        stats.sort(key=lambda x: x[1], reverse=True)
+        print(f"{'Module':30s} | {'# Params':>10s} | {'% of Total':>10s}")
+        print("-" * 60)
+        for name, count in stats:
+            pct = 100 * count / total_params
+            print(f"{name:30s} | {count:10,d} | {pct:10.2f}%")
+        print("-" * 60)
+        print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
+
 
 # class RESMAX_bypass_only_o(nn.Module):
 #     def __init__(self, num_classes=1000, big_size=322, small_size=227, in_chans=3, 
@@ -5197,6 +5347,31 @@ def chresmax_v3_2(pretrained=False, **kwargs):
 
 
 @register_model
+def hmax_v3_adj(pretrained=False, **kwargs):
+    """
+    Registry function to create a CH_2_streams_adjacent_scales model
+    via timm's create_model API.
+    This model uses adjacent scale pairs for contrastive learning.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+    
+    model_backbone = RESMAX_V2_2(contrastive_loss=True, **kwargs)
+    
+    # Create the adjacent scales contrastive model
+    model = CH_2_streams_adjacent_scales(
+        model_backbone=model_backbone, 
+        bypass_only_model_bool=False, 
+        **kwargs
+    )
+    
+    return model
+
+
+@register_model
 def chresmax_v3_2_abs(pretrained=False, **kwargs):
     """
     Registry function to create a CHALEXMAX_V3_3_optimized model
@@ -5311,3 +5486,4 @@ def ft_resmax_v2(pretrained=False, **kwargs):
     
     model = ContrastiveRESMAX_V2(**kwargs)
     return model
+

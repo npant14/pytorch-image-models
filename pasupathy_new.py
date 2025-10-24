@@ -347,6 +347,7 @@ class Pasupathy():
                 slope, intercept, r_value, p_value, std_err = stats.linregress(scales, avg_activities)
                 r_squared = r_value ** 2
             else:
+                # TODO need to resolve this case better
                 slope, intercept, r_squared, p_value, std_err = 0, 0, 0, 1.0, 0
 
             neuron_scale_analysis[neuron_idx] = {
@@ -364,7 +365,128 @@ class Pasupathy():
         
         return neuron_scale_analysis
     
+
     def plot_slope_distribution_figureA(self, neuron_scale_analysis, save_path=None):
+        """
+        Creates a stacked histogram showing the distribution of slopes,
+        replicating the style of Figure 4A from the paper.
+        
+        - Zooms in on the x-range: [-1.8, 1.8]
+        - Uses a bin width of 0.4, centered at 0
+        - Uses rwidth=0.9 for gaps between bars
+        """
+        
+        # --- 1. Define Plot Range and Filter Data ---
+        
+        # Set the bin edges and plot limits
+        # Bins will be [-1.8, -1.4], [-1.4, -1.0], ..., [1.4, 1.8]
+        bin_width = 0.4
+        plot_range_min = -1.8
+        plot_range_max = 1.8
+        
+        significant_slopes_all = []
+        non_significant_slopes_all = []
+        
+        for neuron_id, data in neuron_scale_analysis.items():
+            if data.get('is_significant', False):
+                significant_slopes_all.append(data['slope'])
+            else:
+                non_significant_slopes_all.append(data['slope'])
+                
+        num_neurons_total = len(significant_slopes_all) + len(non_significant_slopes_all)
+        if num_neurons_total == 0:
+            print("No neuron data to plot.")
+            return
+
+        # Filter the data to the "zoomed" plot range
+        significant_slopes_zoomed = [
+            s for s in significant_slopes_all if plot_range_min <= s <= plot_range_max
+        ]
+        non_significant_slopes_zoomed = [
+            s for s in non_significant_slopes_all if plot_range_min <= s <= plot_range_max
+        ]
+
+        # Get the new count *for normalization*
+        num_neurons_zoomed = len(significant_slopes_zoomed) + len(non_significant_slopes_zoomed)
+        if num_neurons_zoomed == 0:
+            print(f"No neuron data within the plot range [{plot_range_min}, {plot_range_max}] to plot.")
+            return
+            
+        # Calculate weights based on the *zoomed* count
+        weights_sig = np.ones_like(significant_slopes_zoomed) / num_neurons_zoomed
+        weights_nonsig = np.ones_like(non_significant_slopes_zoomed) / num_neurons_zoomed
+
+        # --- 2. Create the Plot ---
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        
+        # Define the bin edges
+        bin_edges = np.arange(plot_range_min, plot_range_max + bin_width, bin_width)
+
+        ax.hist(
+            [significant_slopes_zoomed, non_significant_slopes_zoomed],
+            bins=bin_edges,
+            stacked=True,
+            weights=[weights_sig, weights_nonsig],
+            color=['black', 'lightgray'],
+            edgecolor='black',
+            rwidth=0.9  # Set bar width to 90% of bin width
+        )
+        
+        # --- 3. Style the Plot (Axes, Labels, Ticks) ---
+        
+        # Set explicit axis limits and ticks
+        ax.set_xlim(plot_range_min, plot_range_max)
+        ax.set_ylim(0, 0.6)
+        # Set ticks as requested
+        ax.set_xticks(np.arange(-1.6, 1.6 + 0.8, 0.8)) # Ticks at -1.6, -0.8, 0.0, 0.8, 1.6
+        ax.set_yticks([0.00, 0.20, 0.40, 0.60])
+        ax.set_yticklabels(['0.00', '0.20', '0.40', '0.60']) # Ensure formatting
+
+        # Calculate median on ALL data
+        all_slopes = significant_slopes_all + non_significant_slopes_all
+        median_slope = np.median(all_slopes)
+        
+        # Only plot the median arrow if it's within our zoomed range
+        if plot_range_min <= median_slope <= plot_range_max:
+            ax.plot(median_slope, 0.55, 'v', color='gray', markersize=12, clip_on=False, zorder=4)
+        
+        # Update title to show N of plotted neurons and total N
+        ax.set_title(
+            f'A scale test\nN={num_neurons_zoomed} (of {num_neurons_total} total)', 
+            loc='left', 
+            fontsize=16, 
+            weight='bold'
+        )
+        ax.set_xlabel('slope [Δ tuning centroid]', fontsize=14)
+        ax.set_ylabel('proportion of neurons\n(within plotted range)', fontsize=14)
+
+        ax.tick_params(axis='both', which='major', labelsize=12)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Add a text note about excluded data
+        num_excluded = num_neurons_total - num_neurons_zoomed
+        if num_excluded > 0:
+            ax.text(
+                1.0, 1.02, 
+                f'*Excluded {num_excluded} neurons outside range [{plot_range_min}, {plot_range_max}]', 
+                transform=ax.transAxes, 
+                ha='right', 
+                fontsize=9, 
+                style='italic'
+            )
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.98]) # Adjust layout for text
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Figure saved to {save_path}")
+        
+        # plt.show() # Uncomment to display the plot
+        plt.close()
+    
+    def plot_slope_distribution_figureA_old(self, neuron_scale_analysis, save_path=None):
         """
         Creates a stacked histogram showing the distribution of slopes,
         replicating the style of Figure 4A from the paper.
