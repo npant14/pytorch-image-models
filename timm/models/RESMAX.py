@@ -3106,8 +3106,9 @@ class CH_2_streams_training_eval_sep(nn.Module):
         # If in evaluation mode, return stream 1 output without scale augmentation
         # or when set stream_1_bool to True
         if not self.training or self.stream_1_bool:
-            print("self.training is ", self.training, "stream_1_bool is ", self.stream_1_bool)
-            print("HERRRRRE, Korean exp goes to right place")
+            # debugging prints, do not remove
+            # print("self.training is ", self.training, "stream_1_bool is ", self.stream_1_bool)
+            # print("HERRRRRE, Korean exp goes to right place")
             correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
             return stream_1_output, correct_scale_loss
 

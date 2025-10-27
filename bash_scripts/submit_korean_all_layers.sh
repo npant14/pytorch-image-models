@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
 #SBATCH --time=8:00:00
-#SBATCH --array=0-3
+#SBATCH --array=0-4
 #SBATCH --output=./%x_%A_%a.out
 #SBATCH --error=./%x_%A_%a.err
 #SBATCH --mail-user=xizheng_yu@brown.edu
@@ -37,7 +37,7 @@ echo "Running array job for multiple models"
 echo "--------------------------------------------------------"
 
 # Define array of models
-models=("chresmax_v3_2" "chresmax_v3_2_abs" "resnet18" "alexnet")
+models=("hmax_v3_adj" "chresmax_v3_2" "chresmax_v3_2_abs" "resnet18" "alexnet")
 
 # Get the model for this array task
 model_name=${models[$SLURM_ARRAY_TASK_ID]}

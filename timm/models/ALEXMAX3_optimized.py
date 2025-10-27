@@ -293,8 +293,9 @@ class C_scoring2_optimized_debug(nn.Module):
 
             out_feats.append(soft_selection(scores, feats))
             del scores, feats
-
-        print(debug)
+            
+        # this was for debugging purposes
+        # print(debug)
 
         return out_feats
 

@@ -327,41 +327,26 @@ class Pasupathy():
                 avg_activities.append(np.mean(scale_avg_activities[scale]))
             
             # Calculate slope (scale invariance score)
-            # if len(scales) > 1:
-            #     slope, intercept = np.polyfit(scales, avg_activities, 1)
-            #     r_squared = np.corrcoef(scales, avg_activities)[0, 1] ** 2
-            # else:
-            #     slope, intercept, r_squared = 0, 0, 0
-            
-            # neuron_scale_analysis[neuron_idx] = {
-            #     'preferred_rotation': preferred_rot,
-            #     'scales': scales,
-            #     'activities': avg_activities,
-            #     'slope': slope,
-            #     'intercept': intercept,
-            #     'r_squared': r_squared,
-            #     'max_activity_at_preferred': pref_data['max_activity']
-            # }
-            
+            # Only include neurons with sufficient scale data points
             if len(scales) > 1:
                 slope, intercept, r_value, p_value, std_err = stats.linregress(scales, avg_activities)
                 r_squared = r_value ** 2
+                
+                neuron_scale_analysis[neuron_idx] = {
+                    'preferred_rotation': preferred_rot,
+                    'scales': scales,
+                    'activities': avg_activities,
+                    'slope': slope,
+                    'intercept': intercept,
+                    'r_squared': r_squared,
+                    'p_value': p_value,
+                    'std_err': std_err,
+                    'is_significant': p_value < 0.05,
+                    'max_activity_at_preferred': pref_data['max_activity']
+                }
             else:
-                # TODO need to resolve this case better
-                slope, intercept, r_squared, p_value, std_err = 0, 0, 0, 1.0, 0
-
-            neuron_scale_analysis[neuron_idx] = {
-                'preferred_rotation': preferred_rot,
-                'scales': scales,
-                'activities': avg_activities,
-                'slope': slope,
-                'intercept': intercept,
-                'r_squared': r_squared,
-                'p_value': p_value,
-                'std_err': std_err,
-                'is_significant': p_value < 0.05,
-                'max_activity_at_preferred': pref_data['max_activity']
-            }
+                # Skip neurons with insufficient scale data points
+                print(f"Skipping neuron {neuron_idx}: only {len(scales)} scale point(s) available")
         
         return neuron_scale_analysis
     
@@ -1049,11 +1034,14 @@ class Pasupathy():
         rejection_reasons = {"insufficient repeats": [], "weak shape selectivity": []}
 
         num_neurons = all_responses.shape[1]
+        epsilon = 1e-8  # Small value to filter out truly non-responsive neurons
+        
         for neuron_idx in range(num_neurons):
             max_response = max_response_per_neuron[neuron_idx]
             baseline_rate = baseline_rate_per_neuron[neuron_idx]
 
-            if max_response < selectivity_threshold * baseline_rate:
+            # Add epsilon to baseline to handle zero baseline and filter out non-responsive neurons
+            if max_response < (selectivity_threshold * baseline_rate) + epsilon:
                 rejected_neurons.append(neuron_idx)
                 rejection_reasons["weak shape selectivity"].append(neuron_idx)
             else:

@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
-#SBATCH --array=0-3
+#SBATCH --array=0-4
 #SBATCH --output=/users/xyu110/pytorch-image-models/%x_%A_%a.out
 #SBATCH --error=/users/xyu110/pytorch-image-models/%x_%A_%a.err
 #SBATCH --mail-user=xizheng_yu@brown.edu
@@ -28,7 +28,7 @@ which python
 cd /users/xyu110/pytorch-image-models
 
 # Define array of models
-models=("CHRESMAX_V3_2" "ALEXNET-AUG" "RESNET18-AUG" "RESNET50")
+models=("HMAX_V3_ADJ" "CHRESMAX_V3_2" "ALEXNET-AUG" "RESNET18-AUG" "RESNET50")
 
 # Get the model for this array task
 model=${models[$SLURM_ARRAY_TASK_ID]}

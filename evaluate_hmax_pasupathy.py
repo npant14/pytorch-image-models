@@ -6,7 +6,7 @@ import numpy as np
 import sys
 sys.path.append("/users/xyu110/pytorch-image-models")
 import timm
-from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2
+from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2, hmax_v3_adj
 from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
 
@@ -75,6 +75,16 @@ def load_resnet_with_aug():
     model.load_state_dict(checkpoint['state_dict'], strict=False)
     return model
 
+def load_hmax_v3_adj():
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = hmax_v3_adj().to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
+    return model
+
+
     
 def get_model(model_name):
     if model_name == "RESNET50":
@@ -91,6 +101,8 @@ def get_model(model_name):
         return load_chresmax_v3_2_abs()
     elif model_name == "CHRESMAX_V3_2":
         return load_chresmax_v3_2()
+    elif model_name == "HMAX_V3_ADJ":
+        return load_hmax_v3_adj()
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
@@ -102,7 +114,8 @@ hmax_models = [
     "RESNET18-NO_AUG",
     "RESNET18-AUG",
     "CHRESMAX_V3_2_ABS",
-    "CHRESMAX_V3_2"
+    "CHRESMAX_V3_2",
+    "HMAX_V3_ADJ"
 ]
 
 baselines = [
@@ -115,13 +128,14 @@ baselines = [
 
 layers_to_eval = {
     'CHRESMAX_V3_2': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3'],
+    'HMAX_V3_ADJ': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3'],
     'RESNET50': ['layer1', 'layer2', 'layer3', 'layer4'],
     'RESNET18-AUG': ['layer1', 'layer2', 'layer3', 'layer4'],
 }
 
 # Pasupathy data directory
 PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
-OUTPUT_DIR = "./pasupathy_results_1023"
+OUTPUT_DIR = "./pasupathy_results_1027"
 
 def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_analysis=True):
     """Evaluate a single model on Pasupathy experiment using the new enhanced analysis"""
@@ -136,6 +150,7 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
     if layer_name is None:
         layer_names = get_all_layer_names(model)
     else:
+        print(f"Evaluating only specified layer: {layer_name}")
         layer_names = [layer_name]
         
     rfanalyzer = RFAnalyzer(enable_upper_bound=True)
@@ -403,6 +418,8 @@ if __name__ == "__main__":
     parser.add_argument('--layer', type=str, default=None, help="Specific layer to evaluate (optional)")
 
     args = parser.parse_args()
+    
+    # python evaluate_hmax_pasupathy.py --model CHRESMAX_V3_2 --use-new --layer model_backbone.s1
     
     if args.model:
         # Evaluate specific model

@@ -16,7 +16,7 @@ import argparse
 from tqdm import tqdm
 
 from timm.models import create_model
-from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2
+from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2, hmax_v3_adj
 from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
 from utils_hmax import FeatureExtractor, Invert
@@ -516,7 +516,14 @@ def load_resnet18(layername=None):
     print(layers)
     return model, 'resnet18', layername, layers
 
-
+def load_hmax_v3_adj(layername=None):
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = hmax_v3_adj().to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
+    return model, 'hmax_v3_adj', layername, layers
 
 def load_models(modelname, layername=None):
     if modelname == 'hmax_old':
@@ -531,6 +538,8 @@ def load_models(modelname, layername=None):
     elif modelname == 'resnet18':
         # python korean_imagenet.py --model_name resnet18 --layer_name layer1.0.conv1 --run_all_layers
         return load_resnet18(layername)
+    elif modelname == 'hmax_v3_adj':
+        return load_hmax_v3_adj(layername)
     else:
         raise ValueError(f"Unknown model name: {modelname}")
 
@@ -612,8 +621,7 @@ def run_single_layer_experiment(model, modelname, target_layer, device):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Run Hangul character evaluation for model layers.")
-    parser.add_argument('--model_name', type=str, default="hmax_old", 
-                       choices=['hmax_old', 'chresmax_v3_2_abs', 'chresmax_v3_2', 'alexnet', 'resnet18'],
+    parser.add_argument('--model_name', type=str, default="hmax_v3_adj",
                        help='The name of the model to load.')
     parser.add_argument('--layer_name', type=str, default="model_pre.c2b",
                        help='The specific layer to evaluate (for single layer mode).')
