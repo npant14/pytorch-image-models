@@ -130,56 +130,105 @@ class Pasupathy():
 
         return new_img
     
-    def layer_feature_nested(self, features, layer):
+    def _layer_feature_nested(self, features, layer):
+        """
+        Handle nested features, but preserve lists of tensors for multi-scale processing.
+        
+        Returns:
+            torch.Tensor or list: Either a single tensor or a list of tensors (for multi-scale layers)
+        """
         tensor_feature = features[layer]
         
-        if type(tensor_feature) is tuple or type(tensor_feature) is list:
-            tensor_feature = tensor_feature[0]
-            # If it's still nested, get the first element again
-            if type(tensor_feature) is tuple or type(tensor_feature) is list:
+        # If it's a list/tuple, check if all elements are tensors (multi-scale case)
+        if isinstance(tensor_feature, (tuple, list)):
+            # Check if all elements are 4D tensors (multi-scale feature maps)
+            if all(isinstance(t, torch.Tensor) and len(t.shape) == 4 for t in tensor_feature):
+                # Return the list as-is for multi-scale processing
+                print(f"Multi-scale layer detected: {len(tensor_feature)} scales")
+                return list(tensor_feature)  # Convert tuple to list if needed
+            else:
+                # Not all tensors or not 4D - unwrap nested structure
                 tensor_feature = tensor_feature[0]
-                
+                if isinstance(tensor_feature, (tuple, list)):
+                    tensor_feature = tensor_feature[0]
+        
         return tensor_feature
+    
+    
+    def _extract_center_helper(self, tensor_feature, neuron_idx=None):
+        """
+        Helper function to extract center activations from a 4D tensor.
+        
+        Args:
+            tensor_feature: 4D tensor with shape (batch, channels, height, width)
+            neuron_idx: Specific neuron index (if None, returns all neurons)
+            
+        Returns:
+            Center activation(s) - single value if neuron_idx specified, tensor if all neurons
+        """
+        batch_size, channels, height, width = tensor_feature.shape
+        center_h, center_w = height // 2, width // 2
+        
+        if neuron_idx is not None:
+            # Return single neuron activation
+            return tensor_feature[0, neuron_idx, center_h, center_w].item()
+        else:
+            # Return all neurons' activations
+            return tensor_feature[0, :, center_h, center_w].detach().cpu()
+
 
     def extract_center_activations(self, layer_features, img, layer, neuron_idx=None):
         """
         Helper function to extract center activations from a layer for a given image.
+        Handles both single-scale and multi-scale layers.
         
         Args:
             layer_features: FeatureExtractor instance
             img: Input image tensor
             layer: Layer name
             neuron_idx: Specific neuron index (if None, returns all neurons)
-            
+                For multi-scale layers, this indexes into the concatenated neuron array
+                
         Returns:
             Center activations (single value if neuron_idx specified, tensor if all neurons)
         """
         with torch.no_grad():  # Disable gradients to save memory
             features = layer_features(torch.unsqueeze(img, 0).to(self.device))
-            tensor_feature = self.layer_feature_nested(features, layer)
+            tensor_feature = self._layer_feature_nested(features, layer)
             
-            # Handle different tensor shapes for different layer types
-            if len(tensor_feature.shape) == 4:
-                # Convolutional layers: (batch_size, channels, height, width)
-                batch_size, channels, height, width = tensor_feature.shape
-                center_h, center_w = height // 2, width // 2
+            # Check if we have a list of tensors (multi-scale layer)
+            if isinstance(tensor_feature, list):
+                print(f"Processing multi-scale layer with {len(tensor_feature)} scales")
                 
-                if neuron_idx is not None:
-                    # Return single neuron activation
-                    center_activation = tensor_feature[0, neuron_idx, center_h, center_w].item()
-                else:
-                    # Return all neurons' activations
-                    center_activation = tensor_feature[0, :, center_h, center_w].detach().cpu()
+                all_center_activations = []
+                
+                for scale_idx, scale_tensor in enumerate(tensor_feature):
+                    if len(scale_tensor.shape) == 4:
+                        # Use helper to extract center from this scale
+                        center_acts = self._extract_center_helper(scale_tensor, neuron_idx=None)
+                        all_center_activations.append(center_acts)
+                
+                # Concatenate all scales along channel dimension
+                if all_center_activations:
+                    # Stack and concatenate: e.g., 4 scales × 96 channels = 384 total neurons
+                    center_activation = torch.cat(all_center_activations, dim=0)  # Shape: (total_channels,)
+                    
+                    # If specific neuron requested, index into concatenated tensor
+                    if neuron_idx is not None:
+                        center_activation = center_activation[neuron_idx].item()
+                    
+            # Single tensor case (standard convolutional layer)
+            elif len(tensor_feature.shape) == 4:
+                center_activation = self._extract_center_helper(tensor_feature, neuron_idx)
             else:
-                # Skip layers with unsupported tensor shapes (e.g., 1D, 3D, 5D+)
-                print(f"Warning: Skipping layer '{layer}' with unsupported tensor shape: {tensor_feature.shape}")
-                return None
+                raise ValueError(f"Unsupported layer feature shape: {tensor_feature.shape}")
             
             # Clear GPU tensors
             del tensor_feature, features
-            
+                        
             return center_activation
-
+    
+    
     def find_preferred_orientations(self, model, images, layer, canonical_scale=1.0):
         """
         Find the preferred orientation for each neuron (channel) at the center of the feature map.
@@ -921,46 +970,42 @@ class Pasupathy():
         
         return final_mean, neuron_summary
 
-    def get_baseline_activity(self, layer, num_repeats=5, shift_pixels=2, noise_std=0.05):
-        """
-        Calculate the baseline activity of neurons using low-contrast random noise stimuli with small shifts.
-        """
-        print("Calculating baseline activity with low-contrast random noise...")
-        layer_features = FeatureExtractor(self.model, [layer])
-        baseline_activities = []
-        for _ in range(num_repeats):
-            try:
-                # Generate low-contrast random noise image at full image size
-                # very close to black, and low contrast + little bit noise
-                noise = torch.clamp(torch.normal(mean=0.5, std=noise_std, size=(3, self.img_size, self.img_size)), 0, 1)
-                
-                # Apply RF cropping if needed (same as other images)
-                if self.rf_size < self.img_size:
-                    crop_transform = CenterCropPad(output_size=(self.img_size, self.img_size), crop_size=self.rf_size, mode='constant')
-                    noise = crop_transform(noise)
-                
-                # Apply a random shift
-                shift_x = np.random.randint(-shift_pixels, shift_pixels + 1)
-                shift_y = np.random.randint(-shift_pixels, shift_pixels + 1)
-                shifted_image = transforms.functional.affine(noise, angle=0, translate=(shift_x, shift_y), scale=1.0, shear=0)
-                
-                # Extract center activations for all neurons
-                center_activations = self.extract_center_activations(layer_features, shifted_image, layer)
-                
-                if center_activations is None:
-                    raise ValueError(f"Unsupported tensor shape for layer {layer}")
-                
-                baseline_activities.append(center_activations)
-                
-            except Exception as e:
-                print(f"Error calculating baseline activity for layer {layer}: {e}")
-                raise e
+    # def get_baseline_activity(self, layer, num_repeats=20, shift_pixels=2, noise_std=0.05):
+    #     """
+    #     Calculate the baseline activity of neurons using low-contrast random noise stimuli with small shifts.
+    #     """
+    #     print("Calculating baseline activity with low-contrast random noise...")
+    #     layer_features = FeatureExtractor(self.model, [layer])
+    #     baseline_activities = []
+    #     for _ in range(num_repeats):
+    #         # Generate low-contrast random noise image at full image size
+    #         # very close to black, and low contrast + little bit noise
+    #         noise = torch.clamp(torch.normal(mean=0.5, std=noise_std, size=(3, self.img_size, self.img_size)), 0, 1)
+            
+    #         # Apply RF cropping if needed (same as other images)
+    #         if self.rf_size < self.img_size:
+    #             crop_transform = CenterCropPad(output_size=(self.img_size, self.img_size), crop_size=self.rf_size, mode='constant')
+    #             noise = crop_transform(noise)
+            
+    #         # Apply a random shift
+    #         shift_x = np.random.randint(-shift_pixels, shift_pixels + 1)
+    #         shift_y = np.random.randint(-shift_pixels, shift_pixels + 1)
+    #         shifted_image = transforms.functional.affine(noise, angle=0, translate=(shift_x, shift_y), scale=1.0, shear=0)
+            
+    #         # Extract center activations for all neurons
+    #         center_activations = self.extract_center_activations(layer_features, shifted_image, layer)
+            
+    #         if center_activations is None:
+    #             raise ValueError(f"Unsupported tensor shape for layer {layer}")
+            
+    #         baseline_activities.append(center_activations)
 
-        if not baseline_activities:
-            return None
-        # Average across repetitions
-        mean_baseline_activity = torch.mean(torch.stack(baseline_activities), dim=0)
-        return mean_baseline_activity
+
+    #     if not baseline_activities:
+    #         return None
+    #     # Average across repetitions
+    #     mean_baseline_activity = torch.mean(torch.stack(baseline_activities), dim=0)
+    #     return mean_baseline_activity
 
     def get_all_shape_responses(self, layer):
         """
@@ -974,78 +1019,151 @@ class Pasupathy():
         total_images = 0
         for curv_set in self.curv_sets:
             for rot in self.rotations:
-                # Load images with RF cropping applied
                 imgs = load_images(self.data_dir, curv_set, rot, self.img_size, self.rf_size)
                 total_images += len(imgs)
                 for img in imgs:
-                    try:
-                        # Use full image size for resize (cropping already applied in load_images)
-                        img_resized = self.resize_image(img, self.img_size)
-                        
-                        # Extract center activations for all neurons
-                        center_activations = self.extract_center_activations(layer_features, img_resized, layer)
-                        
-                        # Check if the layer is supported (center_activations is not None)
-                        if center_activations is None:
-                            print(f"Layer {layer} has unsupported tensor shape. Aborting analysis.")
-                            return None, 0
-                        
-                        all_responses.append(center_activations)
-                        
-                    except Exception as e:
-                        print(f"Error processing image for layer {layer}: {e}")
-                        raise e
+                    img_resized = self.resize_image(img, self.img_size)
+                    center_activations = self.extract_center_activations(layer_features, img_resized, layer)
+                    
+                    all_responses.append(center_activations)
 
-        if not all_responses:
-            return None, 0
-            
         return torch.stack(all_responses), total_images
 
-    def select_neurons(self, layer, min_repeats=5, selectivity_threshold=4):
-        """
-        Selects neurons based on their response properties.
-        """
-        print("Starting neuron selection...")
+    # def select_neurons(self, layer, min_repeats=5, selectivity_threshold=4):
+    #     """
+    #     Selects neurons based on their response properties.
+    #     """
+    #     print("Starting neuron selection...")
                 
-        # Step 1: Get all shape responses and check trial count
-        all_responses, num_trials = self.get_all_shape_responses(layer)
-        if all_responses is None:
-            print("Could not get shape responses. Aborting neuron selection.")
-            return None, None, None
+    #     # Step 1: Get all shape responses and check trial count
+    #     all_responses, num_trials = self.get_all_shape_responses(layer)
 
-        if num_trials < min_repeats:
-            print(f"Insufficient trials ({num_trials}) for all neurons. Minimum required: {min_repeats}.")
-            # Depending on desired behavior, you might want to stop or just warn.
-            # For now, we'll just create empty lists and return.
-            return [], list(range(all_responses.shape[1])), {"insufficient repeats": list(range(all_responses.shape[1]))}
+    #     # top_percentile = 50
+    #     # response_variance = torch.var(all_responses, dim=0)
+    #     # variance_threshold = torch.quantile(response_variance, q=(100 - top_percentile) / 100)
 
-        # Step 2: Calculate baseline firing
-        baseline_rate_per_neuron = self.get_baseline_activity(layer)
-        if baseline_rate_per_neuron is None:
-            print("Could not calculate baseline activity. Aborting neuron selection.")
-            raise ValueError("Failed to calculate baseline activity")
+    #     if num_trials < min_repeats:
+    #         # This wont happen but present to match original paper's firing filter logic
+    #         print(f"Insufficient trials ({num_trials}) for all neurons. Minimum required: {min_repeats}.")
 
-        # Step 3: Find maximum evoked response for each neuron
-        max_response_per_neuron = torch.max(all_responses, dim=0)[0]
+    #     # Step 2: Calculate baseline firing
+    #     baseline_rate_per_neuron = self.get_baseline_activity(layer)
 
-        # Step 4: Apply selectivity criterion
+    #     # Step 3: Find maximum evoked response for each neuron
+    #     max_response_per_neuron = torch.max(all_responses, dim=0)[0]
+        
+    #     # Step 4: Apply selectivity criterion
+    #     included_neurons, rejected_neurons = [], []
+    #     rejection_reasons = {"insufficient repeats": [], "weak shape selectivity": []}
+
+    #     epsilon = 1e-8  # Small value to filter out truly non-responsive neurons
+
+    #     for neuron_idx in range(all_responses.shape[1]):
+    #         max_response = max_response_per_neuron[neuron_idx]
+    #         baseline_rate = baseline_rate_per_neuron[neuron_idx]
+
+    #         # Add epsilon to baseline to handle zero baseline and filter out non-responsive neurons
+    #         if max_response < (selectivity_threshold * baseline_rate) + epsilon:
+    #             rejected_neurons.append(neuron_idx)
+    #             rejection_reasons["weak shape selectivity"].append(neuron_idx)
+    #         else:
+    #             included_neurons.append(neuron_idx)
+
+    #     import pdb; pdb.set_trace()
+        
+    #     print(f"Neuron selection complete. Included: {len(included_neurons)}, Rejected: {len(rejected_neurons)}")
+    #     return included_neurons, rejected_neurons, rejection_reasons
+
+    def select_neurons(self, layer, min_repeats=5, z_threshold=2.0):
+        """
+        Selects neurons based on z-scored responses across stimuli.
+        A neuron is considered visually selective if it has at least one stimulus 
+        that evokes a response > z_threshold standard deviations above its mean.
+        """        
+        # Step 1: Get all shape responses
+        all_responses, num_trials = self.get_all_shape_responses(layer) # (num_stimuli, num_neurons)
+        # self.plot_response_histogram(all_responses, layer)
+        
+        num_neurons = all_responses.shape[1]
+        print(f"Analyzing {num_neurons} neurons across {num_trials} stimulus presentations")
+        
+        # Step 2: Calculate z-scores for each neuron across all stimuli
+        # For each neuron, compute: z = (response - mean) / std
+        mean_per_neuron = torch.mean(all_responses, dim=0)  # Shape: (num_neurons,)
+        std_per_neuron = torch.std(all_responses, dim=0)    # Shape: (num_neurons,)
+        
+        # Compute z-scores: (num_stimuli, num_neurons)
+        z_scores = (all_responses - mean_per_neuron) / (std_per_neuron + 1e-8)
+        
+        # Step 3: Find maximum z-score for each neuron across all stimuli
+        max_z_per_neuron = torch.max(z_scores, dim=0)[0]  # Shape: (num_neurons,)
+        
+        # Step 4: Select neurons with max z-score >= threshold
         included_neurons = []
         rejected_neurons = []
-        rejection_reasons = {"insufficient repeats": [], "weak shape selectivity": []}
-
-        num_neurons = all_responses.shape[1]
-        epsilon = 1e-8  # Small value to filter out truly non-responsive neurons
+        rejection_reasons = {
+            "low max z-score": [],
+        }
         
         for neuron_idx in range(num_neurons):
-            max_response = max_response_per_neuron[neuron_idx]
-            baseline_rate = baseline_rate_per_neuron[neuron_idx]
-
-            # Add epsilon to baseline to handle zero baseline and filter out non-responsive neurons
-            if max_response < (selectivity_threshold * baseline_rate) + epsilon:
+            max_z = max_z_per_neuron[neuron_idx].item()
+            
+            # Check for neurons with zero variance (non-responsive)
+            if max_z < z_threshold:
                 rejected_neurons.append(neuron_idx)
-                rejection_reasons["weak shape selectivity"].append(neuron_idx)
+                rejection_reasons["low max z-score"].append(neuron_idx)
             else:
                 included_neurons.append(neuron_idx)
         
-        print(f"Neuron selection complete. Included: {len(included_neurons)}, Rejected: {len(rejected_neurons)}")
+        # Print statistics
+        print(f"\nNeuron Selection Results:")
+        print(f"  Included neurons: {len(included_neurons)} ({100*len(included_neurons)/num_neurons:.1f}%)")
+        print(f"  Rejected neurons: {len(rejected_neurons)} ({100*len(rejected_neurons)/num_neurons:.1f}%)")
+        
+        # import pdb; pdb.set_trace()
         return included_neurons, rejected_neurons, rejection_reasons
+
+    # def plot_response_histogram(self, all_responses, layer):
+    #     """
+    #     Plot histogram of all neural responses for a given layer.
+        
+    #     Args:
+    #         layer: Layer name to analyze
+    #         save_path: Path to save the histogram
+    #     """
+    #     print(f"Creating response histogram for {layer}")
+        
+    #     # Flatten all responses to 1D array
+    #     all_responses_flat = all_responses.flatten().cpu().numpy()
+        
+    #     # Create figure
+    #     fig, ax = plt.subplots(figsize=(10, 6))
+        
+    #     # Plot histogram
+    #     ax.hist(all_responses_flat, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+    #     ax.set_xlabel('Response Value', fontsize=12)
+    #     ax.set_ylabel('Count', fontsize=12)
+    #     ax.set_title(f'Distribution of Neural Responses - {layer}\n'
+    #                 f'({len(all_responses_flat)} total responses)', fontsize=14)
+    #     ax.grid(True, alpha=0.3)
+    #     ax.set_yscale('log')
+
+        
+    #     # Add statistics as text
+    #     stats_text = f'Mean: {np.mean(all_responses_flat):.3f}\n'
+    #     stats_text += f'Std: {np.std(all_responses_flat):.3f}\n'
+    #     stats_text += f'Median: {np.median(all_responses_flat):.3f}\n'
+    #     stats_text += f'Max: {np.max(all_responses_flat):.3f}'
+        
+    #     ax.text(0.95, 0.95, stats_text, transform=ax.transAxes,
+    #             verticalalignment='top', horizontalalignment='right',
+    #             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+    #             fontsize=10)
+        
+    #     plt.tight_layout()
+        
+    #     save_path = f"response_hist_{layer}.png"
+    #     plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    #     print(f"Histogram saved to {save_path}")
+        
+    #     plt.close()

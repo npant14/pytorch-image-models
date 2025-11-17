@@ -126,16 +126,18 @@ baselines = [
     "RESNET18-AUG",
 ]
 
+# s1 - len 4; c1 - len 3; s2 - len 3; c2 - len 1?; s2b - len 3; c2b_seq - single tensor; c2b_score - single tensor; s3 - len 1; global_pool - single tensor
+
 layers_to_eval = {
-    'CHRESMAX_V3_2': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3'],
-    'HMAX_V3_ADJ': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3'],
+    'CHRESMAX_V3_2': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3', 'model_backbone.global_pool'],
+    'HMAX_V3_ADJ': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3', 'model_backbone.global_pool'],
     'RESNET50': ['layer1', 'layer2', 'layer3', 'layer4'],
     'RESNET18-AUG': ['layer1', 'layer2', 'layer3', 'layer4'],
 }
 
 # Pasupathy data directory
 PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
-OUTPUT_DIR = "./pasupathy_results_1027"
+OUTPUT_DIR = "./pasupathy_results_1111"
 
 def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_analysis=True):
     """Evaluate a single model on Pasupathy experiment using the new enhanced analysis"""
@@ -146,28 +148,28 @@ def evaluate_model_on_pasupathy_new(model_name, layer_name=None, use_neuron_anal
     if model_name in baselines:
         imgsize = 227
     
-    # Get all available layers if no specific layer is provided
-    if layer_name is None:
-        layer_names = get_all_layer_names(model)
-    else:
-        print(f"Evaluating only specified layer: {layer_name}")
-        layer_names = [layer_name]
+
+    layer_names = get_all_layer_names(model)
         
     rfanalyzer = RFAnalyzer(enable_upper_bound=True)
     rf_analysis_results = rfanalyzer.analyze_model(model, input_size=imgsize)
-    
+    rf_dict = {result['name']: result['rf'][0] for result in rf_analysis_results}
+
     # get intersection of layer_names and rf_layer_names
     rf_layer_names = [x['name'] for x in rf_analysis_results]
     layer_names = [ln for ln in layer_names if ln in rf_layer_names]
-    rf_dict = {result['name']: result['rf'][0] for result in rf_analysis_results}
     
     print(layer_names)
     
     if model_name in layers_to_eval:
         layer_names = layers_to_eval[model_name]
+        
+    if layer_name is None:
+        print(f"Will evaluate {len(layer_names)} layers for {model_name} using enhanced analysis")
+    else:
+        print(f"Evaluating only specified layer: {layer_name}")
+        layer_names = [layer_name]
 
-    print(f"Will evaluate {len(layer_names)} layers for {model_name} using enhanced analysis")
-    
     results = []
     
     # Set up results file paths
@@ -419,7 +421,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    # python evaluate_hmax_pasupathy.py --model CHRESMAX_V3_2 --use-new --layer model_backbone.s1
+    # python evaluate_hmax_pasupathy.py --model HMAX_V3_ADJ --use-new --layer model_backbone.c1
     
     if args.model:
         # Evaluate specific model
