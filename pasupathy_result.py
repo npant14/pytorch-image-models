@@ -51,7 +51,7 @@ def load_hmax_v3_adj(layername=None):
     return model, 'hmax_v3_adj', layername, layers
 
 # %%
-base = "/users/xyu110/pytorch-image-models/pasupathy_results_1110"
+base = "/users/xyu110/pytorch-image-models/pasupathy_results_1111"
 alexnet_data_dir = f"{base}/neuron_analysis_ALEXNET-AUG/neuron_data"
 resnet18_data_dir = f"{base}/neuron_analysis_RESNET18-AUG/neuron_data"
 hmax_v3_adj_data_dir = f"{base}/neuron_analysis_HMAX_V3_ADJ/neuron_data"
@@ -119,11 +119,27 @@ resnet18_median = list(resnet18_median_abs.values())
 hmax_v3_adj_median = list(hmax_v3_adj_median_abs.values())
 
 alexnet_labels = list(alexnet_median_abs.keys())
-resnet18_labels = list(layers_to_eval['RESNET18-AUG'])
+resnet18_labels = list(resnet18_median_abs.keys()) if len(resnet18_median_abs) > 0 else list(layers_to_eval['RESNET18-AUG'])
 hmax_v3_adj_labels = list(layers_to_eval['HMAX_V3_ADJ'])
 
-print("Best (lowest) alexnet score: ", f"{min(alexnet_median):.4f}")
-print("Best (lowest) resnet18 score: ", f"{min(resnet18_median):.4f}")
+# Determine best (lowest) median absolute score and its layer name for AlexNet
+if alexnet_median_abs:
+    best_alexnet_layer = min(alexnet_median_abs, key=alexnet_median_abs.get)
+    best_alexnet_score = alexnet_median_abs[best_alexnet_layer]
+else:
+    best_alexnet_layer = None
+    best_alexnet_score = None
+
+# Determine best (lowest) median absolute score and its layer name for ResNet18
+if resnet18_median_abs:
+    best_resnet_layer = min(resnet18_median_abs, key=resnet18_median_abs.get)
+    best_resnet_score = resnet18_median_abs[best_resnet_layer]
+else:
+    best_resnet_layer = None
+    best_resnet_score = None
+
+print("Best (lowest) alexnet score:", f"{best_alexnet_score:.4f}" if best_alexnet_score is not None else "N/A", "Layer:", best_alexnet_layer)
+print("Best (lowest) resnet18 score:", f"{best_resnet_score:.4f}" if best_resnet_score is not None else "N/A", "Layer:", best_resnet_layer)
 print("HMAX V4 scores: S2 - ", f"{hmax_v3_adj_median[2]:.4f}", " C2 - ", f"{hmax_v3_adj_median[3]:.4f}")
 
 # %%
