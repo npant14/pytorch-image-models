@@ -49,7 +49,7 @@ if [ $IMAGE_SCALE = 0.08 ]; then
 fi
 
 # Check if directory exists and append suffix if needed
-OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/5"
+OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/6"
 # OUTPUT_DIR="/oscar/data/tserre/xyu110/pytorch-output/train/mnist"
 
 mkdir -p OUTPUT_DIR

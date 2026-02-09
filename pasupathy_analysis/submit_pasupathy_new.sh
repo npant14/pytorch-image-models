@@ -36,13 +36,6 @@ model=${models[$SLURM_ARRAY_TASK_ID]}
 echo "Running ENHANCED Pasupathy evaluation for model: $model"
 echo "Array task ID: $SLURM_ARRAY_TASK_ID"
 
-# Configuration options - modify these as needed:
-# --use-new: Use enhanced analysis (required)
-# --no-neuron-analysis: Disable detailed neuron analysis (faster, less detailed)
-# Add --no-neuron-analysis flag below if you want faster analysis without detailed neuron statistics
-
-# Run the evaluation for this specific model using enhanced analysis
-# python evaluate_hmax_pasupathy.py --model CHRESMAX_V3_2 --use-new --layer model_backbone.s1
-python evaluate_hmax_pasupathy.py --model $model --use-new
+python pasupathy_analysis/evaluate_hmax_pasupathy.py --model $model
 
 echo "Evaluation completed for model: $model"

@@ -604,3 +604,90 @@ def visualize_transforms(img, scales, target_size=(322, 322), save_path="transfo
             arr,
             vmin=0, vmax=1        # make sure it knows your data is in [0,1]
         )
+
+
+############################### Pasupathy Model Loaders ##############################
+
+def load_chresmax_v3_2_abs(device='cuda'):
+    """Load CHResMax v3.2 (absolute value) model"""
+    from timm.models.RESMAX import chresmax_v3_2_abs
+    
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_abs_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = chresmax_v3_2_abs(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
+                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
+                 bypass=True, main_route=False, validation=True,
+                 c_scoring='v2'      
+    ).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    return model
+
+
+def load_chresmax_v3_2(device='cuda'):
+    """Load CHResMax v3.2 model"""
+    from timm.models.RESMAX import chresmax_v3_2
+    
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = chresmax_v3_2(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
+                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
+                 bypass=True, main_route=False, validation=True,
+                 c_scoring='v2'      
+    ).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    return model
+
+
+def load_alexnet_with_aug(device='cuda'):
+    """Load AlexNet trained with augmentation"""
+    from timm.models.alexnet import alexnet
+    
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = alexnet(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    return model
+
+
+def load_alexnet_without_aug(device='cuda'):
+    """Load AlexNet trained without augmentation"""
+    from timm.models.alexnet import alexnet
+    
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_wo_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = alexnet(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    return model
+
+
+def load_resnet_without_aug(device='cuda'):
+    """Load ResNet18 trained without augmentation"""
+    from timm.models.resnet import resnet18
+    
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_wo_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = resnet18(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    return model
+
+
+def load_resnet_with_aug(device='cuda'):
+    """Load ResNet18 trained with augmentation"""
+    from timm.models.resnet import resnet18
+    
+    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = resnet18(channel_size=227).to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    return model
+
+
+def load_hmax_v3_adj(device='cuda'):
+    """Load HMAX v3 adjusted model"""
+    from timm.models.RESMAX import hmax_v3_adj
+    
+    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = hmax_v3_adj().to(device).eval()
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    return model

@@ -123,6 +123,7 @@ Testing notebook.ipynb
 /*.tar.*
 
 # HMAX Related
+results/
 pasupathy_results/
 job_scripts/
 val_scripts/
