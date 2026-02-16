@@ -691,3 +691,32 @@ def load_hmax_v3_adj(device='cuda'):
     model = hmax_v3_adj().to(device).eval()
     model.load_state_dict(checkpoint['state_dict'], strict=True)
     return model
+
+
+def load_chmax(device='cuda'):
+    kwargs = {
+        'ip_scale_bands': 18,
+        'classifier_input_size': 4096,
+        'bypass': True,
+        'c_debug': False,
+    }
+    # "/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
+    # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
+    model = create_model(
+        'hmax_old',
+        pretrained="/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
+        num_classes=10,
+        in_chans=3,
+        global_pool=None,
+        scriptable=False,
+        **kwargs
+    )
+    
+    # Set the critical attributes that your friend identified
+    model.model_pre.base_scale = 224
+    model.model_pre.ip_scales = 18
+    
+    layers = dict([*model.named_modules()]).keys()
+    img_size = 224  # hmax_old uses 224x224
+    return model, "hmax_old", layername, layers, img_size
+

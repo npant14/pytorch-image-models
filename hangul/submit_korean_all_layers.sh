@@ -14,15 +14,6 @@
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
-# Check if modules are loaded
-if ml 2>&1 | grep -q "No modules loaded"; then
-    module load miniconda3/23.11.0s
-    source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-    conda activate env_default
-else
-    echo "Modules already loaded, skipping conda activation"
-fi
-
 which python
 
 cd /users/xyu110/pytorch-image-models
@@ -37,7 +28,7 @@ echo "Running array job for multiple models"
 echo "--------------------------------------------------------"
 
 # Define array of models
-models=("hmax_v3_adj" "chresmax_v3_2" "chresmax_v3_2_abs" "resnet18" "alexnet")
+models=("hmax_v3_adj" "resnet18" "alexnet" "vit_base")
 
 # Get the model for this array task
 model_name=${models[$SLURM_ARRAY_TASK_ID]}
@@ -45,6 +36,6 @@ model_name=${models[$SLURM_ARRAY_TASK_ID]}
 echo "Running model: $model_name (Array Task ID: $SLURM_ARRAY_TASK_ID)"
 
 # Run the specific command for this model
-python korean_imagenet.py --model_name $model_name --run_all_layers
+python hangul/korean_imagenet.py --model_name $model_name --run_all_layers
 
 echo "Job finished."

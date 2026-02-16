@@ -9,7 +9,12 @@ from torchvision import transforms,datasets
 torch.manual_seed(1)
 np.random.seed(1)
 
+import sys
 import os
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 import csv
 import random
 import argparse
@@ -19,7 +24,9 @@ from timm.models import create_model
 from timm.models.RESMAX import chresmax_v3_2_abs, chresmax_v3_2, hmax_v3_adj
 from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
-from utils_hmax import FeatureExtractor, Invert
+from utils_hmax import (FeatureExtractor, Invert, load_vit_base, load_hmax_v3_adj, 
+                        load_resnet_with_aug, load_alexnet_with_aug, 
+                        load_chresmax_v3_2, load_chresmax_v3_2_abs, load_chmax)
     
 
 class korean_dataloader():
@@ -290,6 +297,7 @@ class Korean():
                     correlations = correlations.transpose()
                     target_size, test_size = test_size, target_size
 
+                # normalization was wrong, did a double normalization
                 normalized = correlations
                 # normalized = (correlations - np.min(correlations, axis=0)) / (np.max(correlations) - np.min(correlations))
 
@@ -356,77 +364,8 @@ class Korean():
                 d_prime = self.compute_dprime(correct, distractor, best_threshold)
                 d_primes[(target_size, test_size)] = d_prime
                 print(f'd-prime: {d_prime}')
-                # print(f"max test accuracy : {max(collect)}")
-                # maxes[(target_size, test_size)] = max(collect)
-                # print(f"std test accuracy : {statistics.pstdev(collect)}")
-                # errs[(target_size, test_size)] = statistics.pstdev(collect)
                 
         return means, d_primes
-    
-    def get_accuracy_arjun(self, filepaths):
-        means = {}
-        d_primes = {}
-        errs = {}
-        maxes = {}
-        # iterate through all the saved csvs
-        for path in tqdm(filepaths, desc="Evaluating CSV Accuracy"):
-            if path.split("/")[-1].startswith('2scale-'):
-                target_size, test_size = path.replace('2scale-', '').split("/")[-1].split(".")[0].split("-")
-            else:
-                target_size, test_size = path.split("/")[-1].split(".")[0].split("-")
-            # want to check both directions
-            for transpose in [False, True]:
-                CSVData = open(path)
-                correlations = np.loadtxt(CSVData, delimiter=",")
-
-                if transpose:
-                    correlations = correlations.transpose()
-                    target_size, test_size = test_size, target_size
-                    
-
-                normalized = correlations
-
-                correct = []
-                distractor = []
-                for i in range(0, 53, 2):
-                    correct.append(normalized[i][i])
-                    distractor.append(normalized[i][i + 1])
-
-                \
-                threshold = np.min(normalized + 0.00001)
-
-                above_threshold = normalized > threshold
-
-                best_threshold = 0
-                best_accuracy = 0
-
-                for thresh in correct + distractor:
-                    correctly_above_threshold = sum(i > thresh for i in correct)
-                    incorrectly_above_threshold = sum(i > thresh for i in distractor)
-                    correctly_below_threshold = (27) - incorrectly_above_threshold
-                    acc = (correctly_above_threshold + correctly_below_threshold)/(54)
-
-                    if acc >= best_accuracy:
-                        best_accuracy = acc
-                        best_threshold = thresh
-
-                above_threshold = normalized > best_threshold
-
-                correctly_above_threshold = sum(i > best_threshold for i in correct)
-                incorrectly_above_threshold = sum(i > best_threshold for i in distractor)
-                correctly_below_threshold = (27) - incorrectly_above_threshold
-
-                print(f'accuracy: {(correctly_above_threshold + correctly_below_threshold)/(54)}')
-
-                # Calculate d-prime
-                d_prime = self.compute_dprime(correct, distractor, best_threshold)
-                d_primes[(target_size, test_size)] = d_prime
-                print(f'd-prime: {d_prime}')
-
-                means[(target_size, test_size)] = (correctly_above_threshold + correctly_below_threshold)/(54)
-            
-        return means, d_primes
-
     
     def set_layer(self, layer_name):
         self.layer = layer_name
@@ -441,112 +380,37 @@ class Korean():
         return accs, d_primes
 
 
-def load_chmax(layername=None):
-    kwargs = {
-        'ip_scale_bands': 18,
-        'classifier_input_size': 4096,
-        'bypass': True,
-        'c_debug': False,
-    }
-    # "/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
-    # /oscar/home/npant1/data/npant1/HMAX-epoch=59-val_acc1=99.36899038461539-val_loss=0.029037245774629693.ckpt
-    model = create_model(
-        'hmax_old',
-        pretrained="/oscar/data/tserre/xyu110/pytorch-output/train/0/mnist/ip_18_hmax_old_gpu_1_cl_0.5_ip_3_224_224_0000_c1[_6,3,1_]_bypass_1/model_best.pth.tar",
-        num_classes=10,
-        in_chans=3,
-        global_pool=None,
-        scriptable=False,
-        **kwargs
-    )
-    
-    # Set the critical attributes that your friend identified
-    model.model_pre.base_scale = 224
-    model.model_pre.ip_scales = 18
-    
-    layers = dict([*model.named_modules()]).keys()
-    return model, "hmax_old", layername, layers
-
-
-def load_chresmax_v3_2(layername=None):
-    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = chresmax_v3_2(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
-                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
-                 bypass=True, main_route=False,validation=True,
-                 c_scoring='v2'      
-    ).to(device).eval()
-    model.load_state_dict(checkpoint['state_dict'], strict=True)
-    layers = dict([*model.named_modules()]).keys()
-    print(layers)
-    return model, 'chresmax_v3_2', layername, layers
-
-def load_chresmax_v3_2_abs(layername=None):
-    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_chresmax_v3_2_abs_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = chresmax_v3_2_abs(num_classes=1000, big_size=322, small_size=322, in_chans=3, 
-                 ip_scale_bands=3, classifier_input_size=18432, pyramid=False,
-                 bypass=True, main_route=False,validation=True,
-                 c_scoring='v2'      
-    ).to(device).eval()
-    model.load_state_dict(checkpoint['state_dict'], strict=True)
-    layers = dict([*model.named_modules()]).keys()
-    print(layers)
-    return model, 'chresmax_v3_2_abs', layername, layers
-
-
-def load_alexnet(layername=None):
-    # checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
-    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/sep/alexnet_fair_comparasion/model_best.pth.tar"
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = alexnet(channel_size=227).to(device).eval()
-    model.load_state_dict(checkpoint['state_dict'], strict=False)
-    layers = dict([*model.named_modules()]).keys()
-    print(layers)
-    return model, 'alexnet', layername, layers
-
-
-def load_resnet18(layername=None):
-    # checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
-    checkpoint_path = "/oscar/data/tserre/xyu110/pytorch-output/train/sep/resnet_18_fair_comparasion/model_best.pth.tar"
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = resnet18(channel_size=227).to(device).eval()
-    model.load_state_dict(checkpoint['state_dict'], strict=False)
-    layers = dict([*model.named_modules()]).keys()
-    print(layers)
-    return model, 'resnet18', layername, layers
-
-def load_hmax_v3_adj(layername=None):
-    checkpoint_path = '/oscar/data/tserre/xyu110/pytorch-output/train/0/final_versions/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass/model_best.pth.tar'
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = hmax_v3_adj().to(device).eval()
-    model.load_state_dict(checkpoint['state_dict'], strict=True)
-    layers = dict([*model.named_modules()]).keys()
-    print(layers)
-    return model, 'hmax_v3_adj', layername, layers
-
 def load_models(modelname, layername=None):
-    if modelname == 'hmax_old':
-        return load_chmax(layername)
-    elif modelname == 'chresmax_v3_2':
-        return load_chresmax_v3_2(layername)
+    if modelname == 'chresmax_v3_2':
+        model = load_chresmax_v3_2(device=device)
+        img_size = 322  # chresmax_v3_2 uses 322x322
     elif modelname == 'chresmax_v3_abs':
-        return load_chresmax_v3_2_abs(layername)
+        model = load_chresmax_v3_2_abs(device=device)
+        img_size = 322  # chresmax_v3_2_abs uses 322x322
     elif modelname == 'alexnet':
-        # python korean_imagenet.py --model_name alexnet --layer_name features.0 --run_all_layers
-        return load_alexnet(layername)
+        model = load_alexnet_with_aug(device=device)
+        img_size = 227  # AlexNet uses 227x227
     elif modelname == 'resnet18':
-        # python korean_imagenet.py --model_name resnet18 --layer_name layer1.0.conv1 --run_all_layers
-        return load_resnet18(layername)
+        model = load_resnet_with_aug(device=device)
+        img_size = 227  # ResNet uses 227x227
     elif modelname == 'hmax_v3_adj':
-        return load_hmax_v3_adj(layername)
+        model = load_hmax_v3_adj(device=device)
+        img_size = 322  # HMAX uses 322x322
+    elif modelname == 'vit_base':
+        model = load_vit_base(device=device)
+        img_size = 224  # ViT uses 224x224
     else:
         raise ValueError(f"Unknown model name: {modelname}")
 
+    layers = dict([*model.named_modules()]).keys()
+    print(layers)
     
-def run_all_layers_experiment(model, modelname, all_layer_names, device):
+    return model, modelname, layername, layers, img_size
+
+    
+def run_all_layers_experiment(model, modelname, all_layer_names, device, img_size, output_dir):
     """Run Korean experiment for all layers in the model."""
-    print(f"Running experiment for all {len(all_layer_names)} layers")
+    print(f"Running experiment for all {len(all_layer_names)} layers with image size {img_size}")
     
     experiment_results = []
     
@@ -554,10 +418,10 @@ def run_all_layers_experiment(model, modelname, all_layer_names, device):
         try:
             korean_experiment = Korean(
                 model,
-                os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+                os.path.join(output_dir, modelname),
                 device,
                 '/gpfs/data/tserre/npant1/hangul_data',
-                322,
+                img_size,
                 current_layer
             )
             
@@ -574,8 +438,9 @@ def run_all_layers_experiment(model, modelname, all_layer_names, device):
             }
             experiment_results.append([current_layer, default_error_result, default_error_result])
     
-    # Save all results to CSV
-    output_file = f"./{modelname}_all_layers.csv"
+    # Save all results to CSV in the output directory
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"{modelname}_all_layers.csv")
     with open(output_file, 'a') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['layer', 'accuracies', 'd_primes'])
@@ -585,17 +450,17 @@ def run_all_layers_experiment(model, modelname, all_layer_names, device):
     return experiment_results
 
 
-def run_single_layer_experiment(model, modelname, target_layer, device):
+def run_single_layer_experiment(model, modelname, target_layer, device, img_size, output_dir):
     """Run Korean experiment for a single specified layer."""
-    print(f"Running single layer experiment for: {target_layer}")
+    print(f"Running single layer experiment for: {target_layer} with image size {img_size}")
     
     try:
         korean_experiment = Korean(
             model,
-            os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', modelname),
+            os.path.join(output_dir, modelname),
             device,
             '/gpfs/data/tserre/npant1/hangul_data',
-            322,
+            img_size,
             target_layer
         )
         
@@ -627,34 +492,41 @@ if __name__ == "__main__":
                        help='The specific layer to evaluate (for single layer mode).')
     parser.add_argument('--run_all_layers', action='store_true',
                        help='Run evaluation for all layers in the model.')
+    parser.add_argument('--output_dir', type=str, default="results/korean_results_dprime",
+                       help='Directory to save results (default: results/korean_results_dprime)')
 
     args = parser.parse_args()
     
     # Setup device and load model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, model_name, _, available_layers = load_models(args.model_name)
+    model, model_name, _, available_layers, img_size = load_models(args.model_name)
     model = model.to(device)
     
     print(f"Loaded model: {model_name}")
+    print(f"Output directory: {args.output_dir}")
     print(f"Available layers: {len(available_layers)}")
+    print(f"Image size: {img_size}")
     
     # Run the appropriate experiment based on arguments
     final_results = None
     
     if args.run_all_layers:
-        final_results = run_all_layers_experiment(model, model_name, available_layers, device)
+        final_results = run_all_layers_experiment(model, model_name, available_layers, device, img_size, args.output_dir)
         
     else:
-        final_results = run_single_layer_experiment(model, model_name, args.layer_name, device)
+        final_results = run_single_layer_experiment(model, model_name, args.layer_name, device, img_size, args.output_dir)
     
     # Write final results to master results file (only if we have results)
     if final_results is not None:
-        master_results_path = os.path.join('/oscar/data/tserre/xyu110/pytorch-output/korean', "results.csv")
+        os.makedirs(args.output_dir, exist_ok=True)
+        master_results_path = os.path.join(args.output_dir, "results.csv")
         with open(master_results_path, 'a') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([model_name, args.layer_name, final_results])
         print(f"Final results written to {master_results_path}")
     else:
         print("No results to write - experiment failed")
+
+
 
 
