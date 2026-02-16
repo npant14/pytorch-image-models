@@ -220,6 +220,32 @@ class Pasupathy():
             # Single tensor case (standard convolutional layer)
             elif len(tensor_feature.shape) == 4:
                 center_activation = self._extract_center_helper(tensor_feature, neuron_idx)
+            
+            # Transformer case (e.g., Vision Transformer)
+            elif len(tensor_feature.shape) == 3:
+                # Shape: (batch, num_patches, embed_dim)
+                # For ViT, we can use the class token (first token) or average over spatial tokens
+                batch_size, num_patches, embed_dim = tensor_feature.shape
+                
+                # Option 1: Use class token (index 0)
+                # center_activation = tensor_feature[0, 0, :].detach().cpu()
+                
+                # Option 2: Use center patch token (more analogous to CNN center)
+                # For ViT-B/16 with 224x224 input: 14x14=196 patches + 1 class token = 197 total
+                # Skip class token (index 0), reshape remaining to spatial grid
+                spatial_tokens = tensor_feature[0, 1:, :]  # Shape: (196, 768)
+                grid_size = int((num_patches - 1) ** 0.5)  # 14 for ViT-B/16 @ 224x224
+                
+                # Reshape to spatial grid: (grid_size, grid_size, embed_dim)
+                spatial_grid = spatial_tokens.reshape(grid_size, grid_size, embed_dim)
+                
+                # Extract center patch
+                center_h, center_w = grid_size // 2, grid_size // 2
+                center_activation = spatial_grid[center_h, center_w, :].detach().cpu()
+                
+                if neuron_idx is not None:
+                    center_activation = center_activation[neuron_idx].item()
+            
             else:
                 raise ValueError(f"Unsupported layer feature shape: {tensor_feature.shape}")
             

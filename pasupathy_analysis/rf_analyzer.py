@@ -1,5 +1,12 @@
 import torch
 import torch.nn as nn
+import sys
+import os
+
+# Add parent directory to path to import from timm
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 from timm.models.resnet import resnet18, resnet50, Bottleneck, BasicBlock
 from timm.models.alexnet import alexnet
 from timm.models.RESMAX import RESMAX_V2_2

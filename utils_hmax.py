@@ -716,7 +716,24 @@ def load_chmax(device='cuda'):
     model.model_pre.base_scale = 224
     model.model_pre.ip_scales = 18
     
-    layers = dict([*model.named_modules()]).keys()
-    img_size = 224  # hmax_old uses 224x224
-    return model, "hmax_old", layername, layers, img_size
+    return model.to(device).eval()
+
+
+def load_vit_base(device='cuda'):
+    """Load Vision Transformer Base model with ImageNet pretrained weights
+    
+    Uses ViT-Base (ViT-B/16) architecture with patch size 16 and 224x224 input.
+    Pretrained weights are from ImageNet-1k, fine-tuned from ImageNet-21k.
+    
+    Args:
+        device (str): Device to load the model on ('cuda' or 'cpu')
+    
+    Returns:
+        VisionTransformer: ViT-Base model in evaluation mode
+    """
+    from timm.models.vision_transformer import vit_base_patch16_224
+    
+    # Load pretrained ViT-Base model with ImageNet weights
+    model = vit_base_patch16_224(pretrained=True).to(device).eval()
+    return model
 

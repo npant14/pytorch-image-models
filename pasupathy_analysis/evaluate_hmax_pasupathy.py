@@ -4,7 +4,12 @@ import torch
 import numpy as np
 
 import sys
-sys.path.append("/users/xyu110/pytorch-image-models")
+import os
+
+# Add parent directory to path to import from timm
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 import timm
 
 # Import our Pasupathy class and model loaders
@@ -17,7 +22,8 @@ from utils_hmax import (
     load_alexnet_without_aug,
     load_resnet_without_aug,
     load_resnet_with_aug,
-    load_hmax_v3_adj
+    load_hmax_v3_adj,
+    load_vit_base
 )
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,6 +53,8 @@ def get_model(model_name):
         return load_chresmax_v3_2(device)
     elif model_name == "HMAX_V3_ADJ":
         return load_hmax_v3_adj(device)
+    elif model_name == "VIT_BASE":
+        return load_vit_base(device)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
@@ -59,7 +67,8 @@ hmax_models = [
     "RESNET18-AUG",
     "CHRESMAX_V3_2_ABS",
     "CHRESMAX_V3_2",
-    "HMAX_V3_ADJ"
+    "HMAX_V3_ADJ",
+    "VIT_BASE"
 ]
 
 baselines = [
@@ -68,6 +77,7 @@ baselines = [
     "ALEXNET-AUG",
     "RESNET18-NO_AUG",
     "RESNET18-AUG",
+    "VIT_BASE",
 ]
 
 # s1 - len 4; c1 - len 3; s2 - len 3; c2 - len 1?; s2b - len 3; c2b_seq - single tensor; c2b_score - single tensor; s3 - len 1; global_pool - single tensor
@@ -77,11 +87,12 @@ layers_to_eval = {
     'HMAX_V3_ADJ': ['model_backbone.s1', 'model_backbone.c1', 'model_backbone.s2', 'model_backbone.c2', 'model_backbone.s2b', 'model_backbone.c2b_seq', 'model_backbone.c2b_score', 'model_backbone.s3', 'model_backbone.global_pool'],
     'RESNET50': ['layer1', 'layer2', 'layer3', 'layer4'],
     'RESNET18-AUG': ['layer1', 'layer2', 'layer3', 'layer4'],
+    'VIT_BASE': ['blocks.0', 'blocks.1', 'blocks.2', 'blocks.3', 'blocks.4', 'blocks.5', 'blocks.6', 'blocks.7', 'blocks.8', 'blocks.9', 'blocks.10', 'blocks.11'],
 }
 
 # Pasupathy data directory
 PASUPATHY_DATA_DIR = "/oscar/data/tserre/xyu110/subplots"
-OUTPUT_DIR = "./pasupathy_results_1111"
+OUTPUT_DIR = "results/pasupathy_results_1111"
 
 def evaluate_model_on_pasupathy(model_name, layer_name=None, use_neuron_analysis=True):
     """Evaluate a single model on Pasupathy experiment using enhanced analysis"""
@@ -91,8 +102,9 @@ def evaluate_model_on_pasupathy(model_name, layer_name=None, use_neuron_analysis
     imgsize = 322
     if model_name in baselines:
         imgsize = 227
+    if model_name == "VIT_BASE":
+        imgsize = 224
     
-
     layer_names = get_all_layer_names(model)
         
     rfanalyzer = RFAnalyzer(enable_upper_bound=True)
