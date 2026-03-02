@@ -17,10 +17,11 @@ print("V4 Sum:", v4_counts.sum())
 
 # File Paths
 files = {
-    "AlexNet (features.0)": "/users/xyu110/pytorch-image-models/pasupathy_results_1111/neuron_analysis_ALEXNET-AUG/neuron_data/features_0.csv",
-    "ResNet18 (layer2)": "/users/xyu110/pytorch-image-models/pasupathy_results_1111/neuron_analysis_RESNET18-AUG/neuron_data/layer2.csv",
-    "HMAX V4 (S2)": "/users/xyu110/pytorch-image-models/pasupathy_results_1111/neuron_analysis_HMAX_V3_ADJ/neuron_data/model_backbone_s2.csv",
-    "HMAX V4 (C2)": "/users/xyu110/pytorch-image-models/pasupathy_results_1111/neuron_analysis_HMAX_V3_ADJ/neuron_data/model_backbone_c2.csv"
+    "AlexNet (features.0)": "/users/xyu110/pytorch-image-models/results/pasupathy_results_1111/neuron_analysis_ALEXNET-AUG/neuron_data/features_0.csv",
+    "ResNet18 (layer2)": "/users/xyu110/pytorch-image-models/results/pasupathy_results_1111/neuron_analysis_RESNET18-AUG/neuron_data/layer2.csv",
+    "HMAX V4 (S2)": "/users/xyu110/pytorch-image-models/results/pasupathy_results_1111/neuron_analysis_HMAX_V3_ADJ/neuron_data/model_backbone_s2.csv",
+    "HMAX V4 (C2)": "/users/xyu110/pytorch-image-models/results/pasupathy_results_1111/neuron_analysis_HMAX_V3_ADJ/neuron_data/model_backbone_c2.csv",
+    "ViT-Base (block 1)": "/users/xyu110/pytorch-image-models/results/pasupathy_results_1111/neuron_analysis_VIT_BASE/neuron_data/blocks_1.csv"
 }
 
 # Bins

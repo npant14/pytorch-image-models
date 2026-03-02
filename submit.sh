@@ -30,7 +30,9 @@ IMAGE_SCALE_LIST="160 192 227 270 322 382 454"
 
 # ./bash_scripts/val_job.sh chresmax_v3_2 3 0.1 18432 1 128 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_chresmax_v3_2_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass"
 # ./bash_scripts/val_job.sh chresmax_v3_2_abs 3 0.1 18432 1 64 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_chresmax_v3_2_abs_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass" 
-# ./bash_scripts/val_job.sh hmax_v3_adj 3 0.1 18432 1 128 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass"
+./bash_scripts/val_job.sh hmax_v3_adj 3 0.1 18432 1 128 True "160 192 227 270 322 382 454" "1:00:00" "/oscar/data/tserre/xyu110/pytorch-output/train/5/ip_3_hmax_v3_adj_gpu_8_cl_0.1_ip_3_322_322_18432_c1[_6,3,1_]_bypass"
+# ./bash_scripts/val_job.sh vit_base_patch16_224 0 0 0 1 128 False "160 192 227 270 322 382 454" "1:00:00" ""
+./bash_scripts/val_job.sh vit_base_patch16_224 0 0 0 1 128 False "192" "1:00:00" ""
 
 
 # 

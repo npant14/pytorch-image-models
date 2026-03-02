@@ -10,11 +10,6 @@
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
-module load miniconda3/23.11.0s
-source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-# conda activate env_default
-conda activate brain_env
-
 cd /users/xyu110/pytorch-image-models
 
 DATASET="torch/imagenet"
@@ -44,20 +39,40 @@ if [ "CKPT_DIR_VALUE" != "" ]; then
     CHECKPOINT_PATH="CKPT_DIR_VALUE/${MODEL_PTH_USED}.pth.tar"
 fi
 
+# For vit models: use pretrained weights (no checkpoint), 224x224 input
+if [[ "$MODEL" == vit_* ]]; then
+    CHECKPOINT_PATH=""
+    INPUT_SIZE="3 224 224"
+fi
+
 mkdir -p $RESULTS_DIR
 # results_file="${RESULTS_DIR}/baseline_waug_${MODEL_PTH_USED}_${PADDING_MODE}.csv"
-results_file="fair_comparasion.csv"
+results_file="validation_imagenet.csv"
+
+# Build optional checkpoint argument
+if [ -n "$CHECKPOINT_PATH" ]; then
+    CHECKPOINT_ARG="--checkpoint $CHECKPOINT_PATH"
+else
+    CHECKPOINT_ARG=""
+fi
+
+# Only pass HMAX-specific model-kwargs for non-ViT models
+if [[ "$MODEL" == vit_* ]]; then
+    MODEL_KWARGS_ARG=""
+else
+    MODEL_KWARGS_ARG="--model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring=v2 bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE"
+fi
 
 # Run validation for specified parameters
 sh bash_scripts/distributed_val.sh $GPUS validate.py \
     --data-dir /gpfs/data/tserre/data/ImageNet/ILSVRC/Data/CLS-LOC \
     --model $MODEL \
     -b $BATCH_SIZE \
-    --model-kwargs ip_scale_bands=$IP_BANDS classifier_input_size=$CLASSIFIER_INPUT_SIZE c_scoring="v2" bypass=$BYPASS cl=$CL_LAMBDA padding_mode=$PADDING_MODE\
+    $MODEL_KWARGS_ARG \
     --image-scale 3 $IMAGE_SCALE $IMAGE_SCALE \
     --input-size $INPUT_SIZE \
     --pretrained \
-    --checkpoint $CHECKPOINT_PATH \
+    $CHECKPOINT_ARG \
     --results-file $results_file \
     --workers $CPUS
 

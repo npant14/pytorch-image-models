@@ -1,12 +1,9 @@
 import os
 import re
 import pandas as pd
-from korean import Korean
 
-BASE = './korean_results/korean_results_dprime'
-MODEL_NAME_LIST = ['alexnet_all_layers.csv',
-                   'chresmax_v3_2_all_layers.csv',
-                   'resnet18_all_layers.csv']
+BASE = './results/korean_results_dprime'
+MODEL_NAME_LIST = ['vit_base_all_layers.csv']
 
 def avg_npfloat64_dict(cell: str,
                        return_list=False) -> float:

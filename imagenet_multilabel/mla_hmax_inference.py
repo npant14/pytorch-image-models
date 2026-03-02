@@ -14,14 +14,11 @@ from torch.utils.data import DataLoader, Dataset
 import sys
 import os
 
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from timm.models import create_model
-from timm.models.RESMAX import hmax_v3_adj
-from timm.models.alexnet import alexnet
-from timm.models.resnet import resnet18
-from utils_hmax import CenterResizeCropPad
+from utils_hmax import CenterResizeCropPad, load_vit_base
 
 import csv
 import argparse
@@ -55,14 +52,21 @@ def load_model(model_name, checkpoint_path, device):
     Returns:
         Loaded model in eval mode
     """
-    print(f"Loading {model_name} from {checkpoint_path}")
+    print(f"Loading {model_name}" + (f" from {checkpoint_path}" if checkpoint_path else " (pretrained weights)"))
     
+    if model_name == 'vit_base':
+        # ViT-Base uses pretrained ImageNet weights — no checkpoint file needed
+        model = load_vit_base(device=device)
+        model.eval()
+        return model
+
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     if model_name == 'hmax_v3_adj':
+        from timm.models.RESMAX import hmax_v3_adj
         model = hmax_v3_adj(
             num_classes=1000,
             big_size=322,
@@ -77,15 +81,19 @@ def load_model(model_name, checkpoint_path, device):
         )
     
     elif model_name == 'alexnet_aug':
+        from timm.models.alexnet import alexnet
         model = alexnet(channel_size=227)
     
     elif model_name == 'resnet18_aug':
+        from timm.models.resnet import resnet18
         model = resnet18(channel_size=227)
     
     elif model_name == 'alexnet_wo_aug':
+        from timm.models.alexnet import alexnet
         model = alexnet(channel_size=227)
     
     elif model_name == 'resnet18_wo_aug':
+        from timm.models.resnet import resnet18
         model = resnet18(channel_size=227)
     
     else:
@@ -240,10 +248,10 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Evaluate models on ImageNet multi-label dataset')
     parser.add_argument('-m', '--model', type=str, required=True,
-                        choices=['hmax_v3_adj', 'alexnet_aug', 'resnet18_aug', 'alexnet_wo_aug', 'resnet18_wo_aug'],
+                        choices=['hmax_v3_adj', 'alexnet_aug', 'resnet18_aug', 'alexnet_wo_aug', 'resnet18_wo_aug', 'vit_base'],
                         help='Model type to evaluate')
-    parser.add_argument('-c', '--checkpoint', type=str, required=True,
-                        help='Path to model checkpoint')
+    parser.add_argument('-c', '--checkpoint', type=str, default='',
+                        help='Path to model checkpoint (not required for vit_base)')
     parser.add_argument('--cuda', type=int, default=0, choices=[0,1,2,3,4,5,6,7],
                         help='GPU device id (default: 0)')
     parser.add_argument('--data-dir', type=str, 

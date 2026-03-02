@@ -52,3 +52,5 @@ python imagenet_multilabel/mla_hmax_inference.py \
     --checkpoint $CHECKPOINT \
     --input-size $INPUT_SIZE \
     --multiscale
+
+# python imagenet_multilabel/mla_hmax_inference.py --model vit_base --input-size 224 --multiscale
