@@ -2,8 +2,9 @@ import os
 import re
 import pandas as pd
 
-BASE = './results/korean_results_dprime'
-MODEL_NAME_LIST = ['vit_base_all_layers.csv']
+BASE = './results/hangul_results_dprime'
+MODEL_NAME_LIST = ['vit_base_all_layers.csv', 'resnet18_timm_all_layers.csv', 'alexnet_timm_all_layers.csv', 'hmax_v3_adj_all_layers.csv']
+
 
 def avg_npfloat64_dict(cell: str,
                        return_list=False) -> float:
@@ -25,16 +26,22 @@ def avg_npfloat64_dict(cell: str,
         return sum(nums) / len(nums)
 
 
+best_acc_dict = {}
+best_dprime_dict = {}
+
 for model_name in MODEL_NAME_LIST:
     df = pd.read_csv(os.path.join(BASE, model_name), index_col=0)
-    
+
     df['accuracies_avg'] = df['accuracies'].apply(avg_npfloat64_dict)
     df['d_primes_avg'] = df['d_primes'].apply(avg_npfloat64_dict)
 
     highest_acc_row = df.loc[df['accuracies_avg'].idxmax()]
-    print(f"Highest accuracy row for {model_name}:")
-    print(avg_npfloat64_dict(highest_acc_row['accuracies'], return_list=True))
-    print(avg_npfloat64_dict(highest_acc_row['d_primes'], return_list=True))
-    print("\n")
+    best_acc_dict[model_name] = avg_npfloat64_dict(highest_acc_row['accuracies'], return_list=True)
+    best_dprime_dict[model_name] = avg_npfloat64_dict(highest_acc_row['d_primes'], return_list=True)
+
+print("Best accuracies by model:")
+print(best_acc_dict)
+print("\nBest d-primes by model:")
+print(best_dprime_dict)
     
     

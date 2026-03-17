@@ -682,6 +682,29 @@ def load_resnet_with_aug(device='cuda'):
     return model
 
 
+def load_alexnet_timm(device='cuda'):
+    """Load AlexNet with timm-pretrained weights."""
+    from timm.models.alexnet import alexnet
+
+    model = alexnet(pretrained=True).to(device).eval()
+    return model
+
+
+def load_resnet18_timm(device='cuda'):
+    """Load ResNet-18 torchvision weights through timm registry."""
+    from timm.models import create_model
+
+    model = create_model(
+        'resnet18.tv_in1k',
+        pretrained=True,
+        num_classes=1000,
+        in_chans=3,
+        global_pool='avg',
+        scriptable=False,
+    ).to(device).eval()
+    return model
+
+
 def load_hmax_v3_adj(device='cuda'):
     """Load HMAX v3 adjusted model"""
     from timm.models.RESMAX import hmax_v3_adj
@@ -736,4 +759,3 @@ def load_vit_base(device='cuda'):
     # Load pretrained ViT-Base model with ImageNet weights
     model = vit_base_patch16_224(pretrained=True).to(device).eval()
     return model
-

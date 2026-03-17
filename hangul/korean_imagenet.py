@@ -26,7 +26,8 @@ from timm.models.alexnet import alexnet
 from timm.models.resnet import resnet18
 from utils_hmax import (FeatureExtractor, Invert, load_vit_base, load_hmax_v3_adj, 
                         load_resnet_with_aug, load_alexnet_with_aug, 
-                        load_chresmax_v3_2, load_chresmax_v3_2_abs, load_chmax)
+                        load_chresmax_v3_2, load_chresmax_v3_2_abs, load_chmax,
+                        load_alexnet_timm, load_resnet18_timm)
     
 
 class korean_dataloader():
@@ -393,6 +394,12 @@ def load_models(modelname, layername=None):
     elif modelname == 'resnet18':
         model = load_resnet_with_aug(device=device)
         img_size = 227  # ResNet uses 227x227
+    elif modelname == 'alexnet_timm':
+        model = load_alexnet_timm(device=device)
+        img_size = 224  # timm alexnet uses 224x224
+    elif modelname == 'resnet18_timm':
+        model = load_resnet18_timm(device=device)
+        img_size = 224  # timm/torchvision resnet18 uses 224x224
     elif modelname == 'hmax_v3_adj':
         model = load_hmax_v3_adj(device=device)
         img_size = 322  # HMAX uses 322x322
@@ -492,8 +499,8 @@ if __name__ == "__main__":
                        help='The specific layer to evaluate (for single layer mode).')
     parser.add_argument('--run_all_layers', action='store_true',
                        help='Run evaluation for all layers in the model.')
-    parser.add_argument('--output_dir', type=str, default="results/korean_results_dprime",
-                       help='Directory to save results (default: results/korean_results_dprime)')
+    parser.add_argument('--output_dir', type=str, default="results/hangul_results_dprime",
+                       help='Directory to save results (default: results/hangul_results_dprime)')
 
     args = parser.parse_args()
     
@@ -526,7 +533,6 @@ if __name__ == "__main__":
         print(f"Final results written to {master_results_path}")
     else:
         print("No results to write - experiment failed")
-
 
 
 
