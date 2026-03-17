@@ -214,7 +214,8 @@ def validate(args):
     elif args.input_size is not None:
         in_chans = args.input_size[0]
 
-    args.model_kwargs['channel_size'] = args.input_size[-1]
+    if args.model_kwargs:
+        args.model_kwargs['channel_size'] = args.input_size[-1]
 
     model = create_model(
         args.model,
@@ -361,8 +362,9 @@ def validate(args):
 
     
     #####PADDING FOR VALIDATION################
-    print("Padding mode:", args.model_kwargs['padding_mode'])
-    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=args.model_kwargs['padding_mode'])
+    padding_mode = args.model_kwargs.get('padding_mode', 'constant')
+    print("Padding mode:", padding_mode)
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=padding_mode)
     loader = DataLoaderTransformWrapper(loader, transform)
 
 
@@ -440,10 +442,10 @@ def validate(args):
         top1a, top5a = top1.avg, top5.avg
     results = OrderedDict(
         model=args.model,
-        ip_band=args.model_kwargs['ip_scale_bands'],
-        classifier_input_size=args.model_kwargs['classifier_input_size'],
-        bypass=args.model_kwargs['bypass'],
-        cl=args.model_kwargs['cl'],
+        ip_band=args.model_kwargs.get('ip_scale_bands', 'N/A'),
+        classifier_input_size=args.model_kwargs.get('classifier_input_size', 'N/A'),
+        bypass=args.model_kwargs.get('bypass', 'N/A'),
+        cl=args.model_kwargs.get('cl', 'N/A'),
         scale_invariance=args.image_scale[1],
         model_scale=data_config['input_size'][-1],
         top1=round(top1a, 4), top1_err=round(100 - top1a, 4),

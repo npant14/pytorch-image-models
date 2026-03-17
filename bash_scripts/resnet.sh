@@ -11,16 +11,6 @@
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
-
-# Check if modules are loaded
-if ml 2>&1 | grep -q "No modules loaded"; then
-    module load miniconda3/23.11.0s
-    source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-    conda activate env_default
-else
-    echo "Modules already loaded, skipping conda activation"
-fi
-
 which python
 
 cd /users/xyu110/pytorch-image-models

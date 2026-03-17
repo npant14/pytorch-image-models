@@ -11,11 +11,6 @@
 #SBATCH --mail-user=xizheng_yu@brown.edu
 #SBATCH --mail-type=END,FAIL
 
-
-module load miniconda3/23.11.0s
-source /oscar/runtime/software/external/miniconda3/23.11.0/etc/profile.d/conda.sh
-conda activate env_default
-
 cd /users/xyu110/pytorch-image-models
 
 DATASET="torch/imagenet"
