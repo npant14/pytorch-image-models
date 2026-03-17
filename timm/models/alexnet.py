@@ -164,8 +164,7 @@ import torch.utils.model_zoo as model_zoo
 def alexnet(pretrained=False, **kwargs):
     model = AlexNet(**kwargs)
     if pretrained:
-        pass
-        # model.load_state_dict(model_zoo.load_url("/oscar/home/npant1/data/npant1/alexnet-owt-7be5be79.pth"))
+        model.load_state_dict(model_zoo.load_url("https://download.pytorch.org/models/alexnet-owt-7be5be79.pth"))
     return model
 
 @register_model
