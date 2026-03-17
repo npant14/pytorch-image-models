@@ -18,7 +18,12 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from timm.models import create_model
-from utils_hmax import CenterResizeCropPad, load_vit_base
+from utils_hmax import (
+    CenterResizeCropPad,
+    load_vit_base,
+    load_alexnet_timm,
+    load_resnet18_timm,
+)
 
 import csv
 import argparse
@@ -57,6 +62,18 @@ def load_model(model_name, checkpoint_path, device):
     if model_name == 'vit_base':
         # ViT-Base uses pretrained ImageNet weights — no checkpoint file needed
         model = load_vit_base(device=device)
+        model.eval()
+        return model
+
+    if model_name == 'alexnet_timm':
+        # timm AlexNet pretrained on ImageNet-1k
+        model = load_alexnet_timm(device=device)
+        model.eval()
+        return model
+
+    if model_name == 'resnet18_timm':
+        # torchvision ResNet-18 weights through timm registry
+        model = load_resnet18_timm(device=device)
         model.eval()
         return model
 
@@ -248,10 +265,19 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Evaluate models on ImageNet multi-label dataset')
     parser.add_argument('-m', '--model', type=str, required=True,
-                        choices=['hmax_v3_adj', 'alexnet_aug', 'resnet18_aug', 'alexnet_wo_aug', 'resnet18_wo_aug', 'vit_base'],
+                        choices=[
+                            'hmax_v3_adj',
+                            'alexnet_aug',
+                            'resnet18_aug',
+                            'alexnet_wo_aug',
+                            'resnet18_wo_aug',
+                            'alexnet_timm',
+                            'resnet18_timm',
+                            'vit_base',
+                        ],
                         help='Model type to evaluate')
     parser.add_argument('-c', '--checkpoint', type=str, default='',
-                        help='Path to model checkpoint (not required for vit_base)')
+                        help='Path to model checkpoint (not required for vit_base/alexnet_timm/resnet18_timm)')
     parser.add_argument('--cuda', type=int, default=0, choices=[0,1,2,3,4,5,6,7],
                         help='GPU device id (default: 0)')
     parser.add_argument('--data-dir', type=str, 

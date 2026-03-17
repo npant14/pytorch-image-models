@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
 #SBATCH --time=8:00:00
-#SBATCH --array=0-4
+#SBATCH --array=0-3
 #SBATCH --output=./%x_%A_%a.out
 #SBATCH --error=./%x_%A_%a.err
 #SBATCH --mail-user=xizheng_yu@brown.edu
@@ -21,24 +21,19 @@ case $SLURM_ARRAY_TASK_ID in
         INPUT_SIZE=322
         ;;
     1)
-        MODEL="alexnet_aug"
-        CHECKPOINT="/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
-        INPUT_SIZE=227
+        MODEL="alexnet_timm"
+        CHECKPOINT=""
+        INPUT_SIZE=224
         ;;
     2)
-        MODEL="resnet18_aug"
-        CHECKPOINT="/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_w_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]_scale_0.08/model_best.pth.tar"
-        INPUT_SIZE=227
+        MODEL="resnet18_timm"
+        CHECKPOINT=""
+        INPUT_SIZE=224
         ;;
     3)
-        MODEL="alexnet_wo_aug"
-        CHECKPOINT="/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_wo_aug/ip_0_alexnet_gpu_2_cl_0_ip_3_227_227_0_c1[_6,3,1_]/model_best.pth.tar"
-        INPUT_SIZE=227
-        ;;
-    4)
-        MODEL="resnet18_wo_aug"
-        CHECKPOINT="/oscar/data/tserre/xyu110/pytorch-output/train/0/baseline_wo_aug/ip_0_resnet18_gpu_8_cl_0_ip_3_227_227_512_c1[_6,3,1_]/model_best.pth.tar"
-        INPUT_SIZE=227
+        MODEL="vit_base"
+        CHECKPOINT=""
+        INPUT_SIZE=224
         ;;
 esac
 
@@ -47,10 +42,17 @@ echo "Checkpoint: $CHECKPOINT"
 echo "Input size: $INPUT_SIZE"
 
 # Run the evaluation with multiscale
-python imagenet_multilabel/mla_hmax_inference.py \
-    --model $MODEL \
-    --checkpoint $CHECKPOINT \
-    --input-size $INPUT_SIZE \
-    --multiscale
+if [[ -n "$CHECKPOINT" ]]; then
+    python imagenet_multilabel/mla_hmax_inference.py \
+        --model $MODEL \
+        --checkpoint $CHECKPOINT \
+        --input-size $INPUT_SIZE \
+        --multiscale
+else
+    python imagenet_multilabel/mla_hmax_inference.py \
+        --model $MODEL \
+        --input-size $INPUT_SIZE \
+        --multiscale
+fi
 
 # python imagenet_multilabel/mla_hmax_inference.py --model vit_base --input-size 224 --multiscale
