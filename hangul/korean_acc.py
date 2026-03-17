@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import pandas as pd
 
 BASE = './results/hangul_results_dprime'
@@ -36,12 +37,12 @@ for model_name in MODEL_NAME_LIST:
     df['d_primes_avg'] = df['d_primes'].apply(avg_npfloat64_dict)
 
     highest_acc_row = df.loc[df['accuracies_avg'].idxmax()]
-    best_acc_dict[model_name] = avg_npfloat64_dict(highest_acc_row['accuracies'], return_list=True)
-    best_dprime_dict[model_name] = avg_npfloat64_dict(highest_acc_row['d_primes'], return_list=True)
+    best_acc_dict[model_name[:-15]] = avg_npfloat64_dict(highest_acc_row['accuracies'], return_list=True)
+    best_dprime_dict[model_name[:-15]] = avg_npfloat64_dict(highest_acc_row['d_primes'], return_list=True)
 
 print("Best accuracies by model:")
-print(best_acc_dict)
+print(json.dumps(best_acc_dict, indent=2))
 print("\nBest d-primes by model:")
-print(best_dprime_dict)
+print(json.dumps(best_dprime_dict, indent=2))
     
     
