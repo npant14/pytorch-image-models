@@ -92,7 +92,7 @@ def main():
             f"(max pair-index={(len(samples) - 2) // 2})."
         )
 
-    # Match korean_imagenet pairing convention: target/distractor are adjacent indices.
+    # Match e1_korean_imagenet pairing convention: target/distractor are adjacent indices.
     target_cls, target_path = samples[pair_start]
     diff_cls, diff_path = samples[pair_start + 1]
     s30, s2, s5 = args.sizes

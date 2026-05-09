@@ -48,7 +48,7 @@ This repository also includes the Hangul character evaluation used for Figure 3.
 Run:
 
 ```bash
-sbatch hangul/submit_korean_all_layers.sh
+sbatch hangul/e0_submit_korean_all_layers.sh
 ```
 
 Models in the SLURM array job:

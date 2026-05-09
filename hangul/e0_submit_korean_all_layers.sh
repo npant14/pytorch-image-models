@@ -36,6 +36,6 @@ model_name=${models[$SLURM_ARRAY_TASK_ID]}
 echo "Running model: $model_name (Array Task ID: $SLURM_ARRAY_TASK_ID)"
 
 # Run the specific command for this model
-python hangul/korean_imagenet.py --model_name $model_name --run_all_layers
+python hangul/e1_korean_imagenet.py --model_name $model_name --run_all_layers
 
 echo "Job finished."
