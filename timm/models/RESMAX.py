@@ -591,7 +591,7 @@ class RESMAX_V2_2(nn.Module):
             pool_func2=nn.MaxPool2d(kernel_size=6, stride=2),
             resize_kernel_1=3,
             resize_kernel_2=1,
-            skip=2,
+            skip=1,
             global_scale_pool=False
         )
         
@@ -618,7 +618,7 @@ class RESMAX_V2_2(nn.Module):
                 pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
                 resize_kernel_1=3,
                 resize_kernel_2=1,
-                skip=2,
+                skip=1,
                 global_scale_pool=False
             )
         else:

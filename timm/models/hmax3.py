@@ -302,8 +302,6 @@ class Residual(nn.Module):
         return F.relu(Y)
 
 
-
-
 class S2b_Res(nn.Module):
     """S2b bypass layer with residual blocks."""
     def __init__(self):
@@ -378,7 +376,7 @@ class Resmax(nn.Module):
             pool_func2=nn.MaxPool2d(kernel_size=6, stride=2),
             resize_kernel_1=3,
             resize_kernel_2=1,
-            skip=2,
+            skip=1,
             global_scale_pool=False
         )
         
@@ -412,7 +410,7 @@ class Resmax(nn.Module):
                 pool_func2=nn.MaxPool2d(kernel_size=6, stride=3, padding=1),
                 resize_kernel_1=3,
                 resize_kernel_2=1,
-                skip=2,
+                skip=1,
                 global_scale_pool=True
             )
         else:
@@ -492,21 +490,16 @@ class Resmax(nn.Module):
         return out
 
 
-class CH_2_streams_training_eval_sep(nn.Module):
+class CH_2_streams_adjacent_scales(nn.Module):
     """
-    Generic 2-stream contrastive learning model with bypass architecture.
-    Uses configurable backbone for different model variants.
-    During training: returns stream_2_output (scaled/augmented) for backpropagation
-    During evaluation: returns stream_1_output (original) for clean evaluation
-    
-    This is the wrapper class used by HMAX3.
+    Contrastive learning model with adjacent scale pairs instead of original vs random scale.
+    Performs contrastive alignment between adjacent scale pairs like (0.49, 0.59), (0.59, 0.707), etc.
     """
     def __init__(self, 
                  contrastive_loss=True,
                  bypass=True,
                  model_backbone=None,
                  bypass_only_model_bool=False,
-                 stream_1_bool=False,
                  **kwargs):
         super().__init__()
         self.contrastive_loss = contrastive_loss
@@ -516,67 +509,91 @@ class CH_2_streams_training_eval_sep(nn.Module):
         
         self.model_backbone.contrastive_loss = contrastive_loss
         self.num_classes = self.model_backbone.num_classes
-        self.stream_1_bool = stream_1_bool
+        
+        # Define scale factor list and adjacent pairs
+        self.scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        self.adjacent_pairs = [(self.scale_factor_list[i], self.scale_factor_list[i+1]) 
+                              for i in range(len(self.scale_factor_list)-1)]
         
         self.print_param_stats(model_backbone)
         
-    def forward(self, x):
-        """
-        Creates two streams (original + random-scaled) for scale-consistency training.
-
-        Returns:
-            (output, correct_scale_loss)
-        """
-        # stream 1 (original scale)
-        result = self.model_backbone(x)
-        if self.bypass_only_model_bool:
-            if self.bypass:
-                stream_1_output, stream_1_c1_feats, stream_1_bypass = result
-            else:
-                stream_1_output, stream_1_c1_feats = result
-        else:
-            if self.bypass:
-                stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
-            else:
-                stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
-
-        # If in evaluation mode, return stream 1 output without scale augmentation
-        # or when set stream_1_bool to True
-        if not self.training or self.stream_1_bool:
-            print("self.training is ", self.training, "stream_1_bool is ", self.stream_1_bool)
-            print("HERRRRRE, Korean exp goes to right place")
-            correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
-            return stream_1_output, correct_scale_loss
-
-        # stream 2 (random scale) - only during training
-        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
-        scale_factor = random.choice(scale_factor_list)
+    def _apply_scale_and_resize(self, x, scale_factor):
+        """Apply scale factor and resize back to original dimensions"""
         img_hw = x.shape[-1]
         new_hw = int(img_hw * scale_factor)
-        x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+        x_scaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
 
         if new_hw <= img_hw:
             # pad if smaller
-            x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+            x_scaled = pad_to_size(x_scaled, (img_hw, img_hw))
         else:
             # center-crop if bigger
             center_crop = torchvision.transforms.CenterCrop(img_hw)
-            x_rescaled = center_crop(x_rescaled)
-
-        # forward pass on the scaled input
-        result = self.model_backbone(x_rescaled)
+            x_scaled = center_crop(x_scaled)
+            
+        return x_scaled
+        
+    def forward(self, x):
+        """
+        Creates two streams with adjacent scale pairs for scale-consistency training.
+        During training: uses adjacent scaled pairs for contrastive learning
+        During validation: uses original unscaled image
+        Returns:
+            (output, correct_scale_loss)
+        """
+        # During validation/evaluation, use original unscaled image
+        if not self.training:
+            result = self.model_backbone(x)
+            correct_scale_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
+            
+            if self.bypass_only_model_bool:
+                if self.bypass:
+                    output, _, _ = result
+                else:
+                    output, _ = result
+            else:
+                if self.bypass:
+                    output, _, _, _ = result
+                else:
+                    output, _, _ = result
+            
+            return output, correct_scale_loss
+        
+        # Training mode: use adjacent scale pairs for contrastive learning
+        # Randomly select an adjacent pair
+        scale_1, scale_2 = random.choice(self.adjacent_pairs)
+        
+        # Create two scaled versions
+        x_scale_1 = self._apply_scale_and_resize(x, scale_1)
+        x_scale_2 = self._apply_scale_and_resize(x, scale_2)
+        
+        # Forward pass on first scaled input
+        result_1 = self.model_backbone(x_scale_1)
         if self.bypass_only_model_bool:
             if self.bypass:
-                stream_2_output, stream_2_c1_feats, stream_2_bypass = result
+                stream_1_output, stream_1_c1_feats, stream_1_bypass = result_1
             else:
-                stream_2_output, stream_2_c1_feats = result
+                stream_1_output, stream_1_c1_feats = result_1
         else:
             if self.bypass:
-                stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+                stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result_1
             else:
-                stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+                stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result_1
 
-        # Compute scale-consistency loss between the two streams, list ver
+        # Forward pass on second scaled input
+        result_2 = self.model_backbone(x_scale_2)
+        if self.bypass_only_model_bool:
+            if self.bypass:
+                stream_2_output, stream_2_c1_feats, stream_2_bypass = result_2
+            else:
+                stream_2_output, stream_2_c1_feats = result_2
+        else:
+            if self.bypass:
+                stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result_2
+            else:
+                stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result_2
+
+        # Compute scale-consistency loss between the two adjacent scale streams
         c1_correct_scale_loss = 0
         for i in range(len(stream_1_c1_feats)):
             c1_correct_scale_loss += torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i]))
@@ -600,11 +617,11 @@ class CH_2_streams_training_eval_sep(nn.Module):
 
         correct_scale_loss = c1_correct_scale_loss + c2_correct_scale_loss + 0.1 * out_correct_scale_loss + bypass_correct_scale_loss
 
-        # Return stream 2 output (scaled/augmented) for training to learn scale invariance
-        return stream_2_output, correct_scale_loss
+        # Return the output from the first stream (could also average both streams)
+        return stream_1_output, correct_scale_loss
 
     def print_param_stats(self, backbone):
-        print(f"\nParameter breakdown for {backbone.__class__.__name__}:\n")
+        print(f"\nParameter breakdown for {backbone.__class__.__name__} (Adjacent Scales):\n")
         total_params = 0
         stats = []
         for name, module in backbone.named_children():
@@ -616,8 +633,10 @@ class CH_2_streams_training_eval_sep(nn.Module):
         print(f"{'Module':30s} | {'# Params':>10s} | {'% of Total':>10s}")
         print("-" * 60)
         for name, count in stats:
-            print(f"{name:30s} | {count:10,d} | {count/total_params*100:9.1f}%")
-        print(f"{'Total':30s} | {total_params:10,d} | {100:9.1f}%")
+            pct = 100 * count / total_params
+            print(f"{name:30s} | {count:10,d} | {pct:10.2f}%")
+        print("-" * 60)
+        print(f"{'Total':30s} | {total_params:10,d} | {100.00:10.2f}%\n")
 
 
 @register_model
@@ -645,7 +664,7 @@ def hmax3(pretrained=False, **kwargs):
     model_backbone = Resmax(contrastive_loss=True, **kwargs)
     
     # Wrap it with the 2-stream training/evaluation wrapper
-    model = CH_2_streams_training_eval_sep(
+    model = CH_2_streams_adjacent_scales(
         model_backbone=model_backbone, 
         bypass_only_model_bool=False, 
         **kwargs
