@@ -276,7 +276,7 @@ class IterableImageDataset(data.IterableDataset):
             if extra is None:
                 yield img, target
             else:
-                yield img, target, *extra
+                yield img, target, extra
 
     def __len__(self):
         if hasattr(self.reader, '__len__'):

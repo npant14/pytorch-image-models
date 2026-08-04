@@ -70,12 +70,12 @@ try:
 except ImportError as e:
     has_functorch = False
 
-CSV_FILE= "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
+CSV_FILE= "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_concept_surgery/finetuning_models/fp_checked2.csv"
 ROOT_DIR = "/oscar/data/tserre/npant1/ILSVRC/train"
 MASK_LOOKUP_JSON = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_hmax_masks/HMAX/SAM_Imagenet/sam2/image_to_mask_lookup.json"
 
 if not os.path.exists(CSV_FILE):
-    CSV_FILE = "/cifs/data/tserre_lrs/projects/projects/prj_concept_surgery/finetuning_models/foreground_proportions_five1.csv"
+    CSV_FILE = "/files22_lrsresearch/CLPS_Serre_Lab/projects/prj_concept_surgery/finetuning_models/fp_checked2.csv"
 if not os.path.exists(MASK_LOOKUP_JSON):
     MASK_LOOKUP_JSON = '/users/irodri15/data/irodri15/Hmax/pytorch-image-models/timm/data/_info/image_to_mask_lookup.json'
 import pandas as pd
@@ -183,6 +183,8 @@ group.add_argument('--cl-lambda', default=0,  type=float,
                    help='lambda to scale cl term')
 group.add_argument('--alpha', default=0.01,  type=float,
                    help='lambda to scale cl term')
+group.add_argument('--start-epoch', default=None, type=int,
+                   help='start epoch (default: None)')
 # Device & distributed
 group = parser.add_argument_group('Device parameters')
 group.add_argument('--device', default='cuda', type=str,
@@ -348,7 +350,9 @@ def save_image(image, filename):
 
 def get_scale_band(paths):
     scale_band = []
-    for path in paths[0]:
+    # Flatten the nested list structure
+    
+    for path in paths[0][0]:
         item = path.split('/')[-1]
         if item in lookup_file_scale:
             scale = lookup_file_scale[item]
@@ -409,7 +413,7 @@ def train_one_epoch(
         #scale_band = scale_band  # So larger scale_band is smaller loss
        
         scale_band = scale_bands_range(scale_band,new_min=0, new_max=num_bands)
-        
+        scale_band = num_bands - scale_band
         #center = center.to(device)
         
         last_batch = batch_idx == last_batch_idx
@@ -772,7 +776,7 @@ def main():
         updates_per_epoch=updates_per_epoch,
     )
 
-    start_epoch = 0
+    start_epoch = args.start_epoch if args.start_epoch is not None else 0
 
     # Setup checkpoint saver
     best_metric = None

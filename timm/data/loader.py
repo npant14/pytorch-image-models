@@ -57,7 +57,7 @@ def fast_collate(batch):
             extra_items = []
             for i in range(2, len(batch[0])):
                 extra_items.append([b[i] for b in batch])
-            return tensor, targets, *extra_items
+            return tensor, targets, extra_items
         return tensor, targets
     elif isinstance(batch[0][0], torch.Tensor):
         targets = torch.tensor([b[1] for b in batch], dtype=torch.int64)
@@ -70,7 +70,7 @@ def fast_collate(batch):
             extra_items = []
             for i in range(2, len(batch[0])):
                 extra_items.append([b[i] for b in batch])
-            return tensor, targets, *extra_items
+            return tensor, targets, extra_items
         return tensor, targets
     else:
         assert False
@@ -214,7 +214,7 @@ class PrefetchLoaderScale:
                 if extra is None:
                     yield input, target
                 else:
-                    yield input, target, *extra
+                    yield input, target, extra
             else:
                 first = False
 
@@ -226,7 +226,7 @@ class PrefetchLoaderScale:
         if extra is None:
             yield input, target
         else:
-            yield input, target, *extra
+            yield input, target, extra
 
     def __len__(self):
         return len(self.loader)
@@ -539,7 +539,7 @@ def custom_collate(batch):
                 else:
                     # Keep other items (like paths) as lists
                     extra_items.append([b[i] for b in batch])
-            return tensor, targets, *extra_items
+            return tensor, targets, extra_items
     else:
         return torch.utils.data.dataloader.default_collate(batch)
 

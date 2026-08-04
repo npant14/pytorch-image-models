@@ -328,7 +328,7 @@ def validate(args):
 
     # take one image from the loader
     sample_image, _ = next(iter(loader))
-
+    visualize = False
     if visualize:
         desired_class = 207  # golden retriever
         sample_images = []
@@ -364,8 +364,9 @@ def validate(args):
         exit(0)
 
     #####PADDING FOR VALIDATION################
-    print("Padding mode:", args.model_kwargs['padding_mode'])
-    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=args.model_kwargs['padding_mode'])
+    #print("Padding mode:", args.model_kwargs['padding_mode'])
+    #transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode=args.model_kwargs['padding_mode'])
+    transform = CenterResizeCropPad(output_size=target_size, scale=args.image_scale[1], mode='constant')
     loader = DataLoaderTransformWrapper(loader, transform)
 
     batch_time = AverageMeter()
