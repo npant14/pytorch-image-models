@@ -573,7 +573,7 @@ class ALEXMAX_v3_3(nn.Module):
             return image_pyramid
         else: 
             return [x]
-    def forward(self, x,pyramid=False,main_route=False):
+    def forward(self, x,scale_band=None,pyramid=False,main_route=False):
         #resize image
         # always making pyramid to start with only two scales. 
         if main_route:

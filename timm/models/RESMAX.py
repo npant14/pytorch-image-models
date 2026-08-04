@@ -1466,6 +1466,162 @@ class CHRESMAX_V3_2_abs(nn.Module):
 
         return stream_1_output, correct_scale_loss
     
+"""
+choose smartly in bypass
+"""
+class CHRESMAX_V3_3_abs(nn.Module):
+    """
+    Example student-teacher style model with scale-consistency loss,
+    using RESMAX_V2 as the backbone.
+
+    In V3, the resmax_v2 returns full feature maps for C1 and C2 layers. Before
+    the returned features are [0] for C1 and C2.
+    """
+    def __init__(self, 
+                 num_classes=1000,
+                 in_chans=3,
+                 ip_scale_bands=1,
+                 classifier_input_size=13312,
+                 contrastive_loss=True,
+                 bypass=False,
+                 **kwargs):
+        super().__init__()
+        self.contrastive_loss = contrastive_loss
+        self.num_classes = num_classes
+        self.in_chans = in_chans
+        self.ip_scale_bands = ip_scale_bands
+        self.bypass = bypass
+        
+        # Use the optimized backbone
+        self.model_backbone = RESMAX_abs(
+            num_classes=num_classes,
+            in_chans=in_chans,
+            ip_scale_bands=self.ip_scale_bands,
+            classifier_input_size=classifier_input_size,
+            contrastive_loss=self.contrastive_loss,
+            bypass=bypass,
+        )
+
+    def get_neighbor_scale_factor(self,x,scale_band):
+        scale_factor_list = [0.49, 0.59, 0.707, 0.841, 1.0, 1.189, 1.414, 1.681, 2.0]
+        # divide the scale factor list into num_scale_bands
+        scale_factor_list = np.array_split(scale_factor_list, self.ip_scale_bands)
+        x_rescaled = []
+        for i in range(len(scale_band)):
+            x_i = x[i:i+1]
+            
+            sub_list = scale_factor_list[scale_band[i]-1]
+            img_hw = x_i.shape[-1]
+            #choose one scale factor from the list randomly 
+            scale_factor = random.choice(sub_list)
+            new_hw = int(img_hw * scale_factor)
+            x_i = F.interpolate(x_i, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+            if new_hw <= img_hw:
+                x_i = pad_to_size(x_i, (img_hw, img_hw))
+            else:
+                center_crop = torchvision.transforms.CenterCrop(img_hw)
+                x_i = center_crop(x_i)
+            x_rescaled.append(x_i)
+        x_rescaled = torch.cat(x_rescaled, dim=0)
+        return x_rescaled
+
+       
+
+    def forward(self, x, scale_band=None):
+        """
+        Creates two streams (original + random-scaled) for scale-consistency training.
+        Returns:
+            (output_of_stream1, correct_scale_loss)
+        """
+        # stream 1 (original scale)
+        result = self.model_backbone(x)
+        if self.bypass:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats, stream_1_bypass = result
+        else:
+            stream_1_output, stream_1_c1_feats, stream_1_c2_feats = result
+        
+
+        # stream 2  rescaled 
+        
+        scale_factor_list = [ 0.707, 0.841, 1.0, 1.189, 1.414]
+        
+        if scale_band is not None:
+            scale_factor_list = np.array_split(scale_factor_list, self.ip_scale_bands+1)
+            # check if all the numbers in scale_band are the same
+            scale_band_all_same = all(x == scale_band[0] for x in scale_band)
+            if scale_band_all_same:
+                
+                scale_factor_sub_list = scale_factor_list[scale_band[0]]
+               
+                scale_factor = random.choice(scale_factor_sub_list)
+                img_hw = x.shape[-1]
+                new_hw = int(img_hw * scale_factor)
+                x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+                if new_hw <= img_hw:
+                    x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+                else:
+                    center_crop = torchvision.transforms.CenterCrop(img_hw)
+                    x_rescaled = center_crop(x_rescaled)
+            if not scale_band_all_same:
+                
+                # random choicce from 0 to self.ip_scale_bands-1
+                unique_values = list(set(scale_band))
+                scale_band_index = random.choice(unique_values)
+                
+                # get the scale factor from the list
+                scale_factor_sub_list = scale_factor_list[scale_band_index]
+                scale_factor = random.choice(scale_factor_sub_list)
+                img_hw = x.shape[-1]
+                new_hw = int(img_hw * scale_factor) 
+                x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+                if new_hw <= img_hw:
+                    x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+                else:
+                    center_crop = torchvision.transforms.CenterCrop(img_hw)
+                    x_rescaled = center_crop(x_rescaled)  
+              
+        else:
+           
+            scale_factor = random.choice(scale_factor_list)
+            img_hw = x.shape[-1]
+            new_hw = int(img_hw * scale_factor)
+            x_rescaled = F.interpolate(x, size=(new_hw, new_hw), mode='bilinear', align_corners=False)
+            if new_hw <= img_hw:
+                x_rescaled = pad_to_size(x_rescaled, (img_hw, img_hw))
+            else:
+                center_crop = torchvision.transforms.CenterCrop(img_hw)
+                x_rescaled = center_crop(x_rescaled)
+
+        # forward pass on the scaled input
+        result = self.model_backbone(x_rescaled)
+        if self.bypass:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats, stream_2_bypass = result
+        else:
+            stream_2_output, stream_2_c1_feats, stream_2_c2_feats = result
+
+        # Compute scale-consistency loss between the two streams efficiently
+        c1_correct_scale_loss = torch.tensor(0., device=x.device)
+        for i in range(len(stream_1_c1_feats)):
+            c1_correct_scale_loss.add_(torch.mean(torch.abs(stream_1_c1_feats[i] - stream_2_c1_feats[i])))
+        c1_correct_scale_loss.div_(len(stream_1_c1_feats))
+        
+        c2_correct_scale_loss = torch.tensor(0., device=x.device)
+        for i in range(len(stream_1_c2_feats)):
+            c2_correct_scale_loss.add_(torch.mean(torch.abs(stream_1_c2_feats[i] - stream_2_c2_feats[i])))
+        c2_correct_scale_loss.div_(len(stream_1_c2_feats))
+        
+        out_correct_scale_loss = torch.mean(torch.abs(stream_1_output - stream_2_output))
+
+        if self.bypass:
+            bypass_correct_scale_loss = torch.mean(torch.abs(stream_1_bypass - stream_2_bypass))
+        else:
+            bypass_correct_scale_loss = torch.tensor(0., device=x.device)
+        
+        correct_scale_loss = 0.3*c1_correct_scale_loss + 0.5*c2_correct_scale_loss + 0.5 * out_correct_scale_loss + bypass_correct_scale_loss
+
+        return stream_1_output, correct_scale_loss
+    
+
 
 """thinner but deeper version or resmax, following resnet18"""
 class RESMAX_V3(nn.Module):
@@ -2784,6 +2940,8 @@ class CHRESMAX_V3_3(nn.Module):
 
         return stream_1_output, correct_scale_loss
 
+
+
 class CHRESMAX_V3_A(nn.Module):
     """
     Example student-teacher style model with scale-consistency loss,
@@ -4067,6 +4225,20 @@ def chresmax_v3_2_abs(pretrained=False, **kwargs):
         print(key, val)
 
     model = CHRESMAX_V3_2_abs(**kwargs)
+    return model
+@register_model
+def chresmax_v3_3_abs(pretrained=False, **kwargs):
+    """
+    Registry function to create a CHALEXMAX_V3_3_optimized model
+    via timm's create_model API.
+    """
+    for key in ["pretrained_cfg", "pretrained_cfg_overlay", "drop_rate"]:
+        kwargs.pop(key, None)
+
+    for key, val in kwargs.items():
+        print(key, val)
+
+    model = CHRESMAX_V3_3_abs(**kwargs)
     return model
 
 @register_model
